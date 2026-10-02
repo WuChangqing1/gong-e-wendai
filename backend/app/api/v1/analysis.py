@@ -121,6 +121,7 @@ def analysis_history(
     from sqlalchemy import select
 
     from app.models.cash import AnalysisResult
+    from app.services.cash_engine import AnalysisStatus, is_engine_version_current
 
     rows = db.scalars(
         select(AnalysisResult)
@@ -132,7 +133,10 @@ def analysis_history(
         {
             "id": row.id,
             "mode": row.mode,
-            "status": row.status,
+            # 历史结果按当前状态枚举归一：旧版本的 OK 统一读作 FEASIBLE
+            "status": str(
+                AnalysisStatus.coerce(row.status) or AnalysisStatus.INPUT_INCOMPLETE
+            ),
             "max_withdrawable_cents": row.max_withdrawable_cents,
             "snapshot_at": row.snapshot_at.isoformat(),
             "limiting_timestamp": row.limiting_timestamp.isoformat()
@@ -143,6 +147,7 @@ def analysis_history(
             "is_stale": row.is_stale,
             "stale_reason": row.stale_reason,
             "engine_version": row.engine_version,
+            "engine_version_current": is_engine_version_current(row.engine_version),
             "created_at": row.created_at.isoformat(),
         }
         for row in rows

@@ -43,6 +43,7 @@ EVENT_TYPES = (
     "sale_receipt",
     "supplier_payment",
     "rent",
+    "refund",
     "payroll",
     "utility",
     "tax",

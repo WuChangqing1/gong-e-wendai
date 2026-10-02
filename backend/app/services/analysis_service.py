@@ -35,6 +35,7 @@ from app.schemas.analysis import (
 )
 from app.services.cash_engine import (
     ENGINE_VERSION,
+    STATUS_LABELS,
     AnalysisStatus,
     CashEventInput,
     EngineInput,
@@ -56,11 +57,12 @@ STALE_REASON_DEFAULT = "收付款事项或资金时点已变更"
 EVENT_TYPE_LABELS = {
     "settlement": "结算款",
     "sale_receipt": "销售收款",
-    "supplier_payment": "供应商付款",
+    "supplier_payment": "进货款",
     "rent": "房租",
+    "refund": "退款",
     "payroll": "工资",
     "utility": "水电",
-    "tax": "税费",
+    "tax": "税款",
     "loan_repayment": "还款",
     "platform_fee": "平台费用",
     "transfer_in": "转入",
@@ -318,7 +320,10 @@ class AnalysisService:
         if persist:
             persisted = self._persist(profile, primary, payload, payload_dict, actor_id)
 
-        return self._to_out(profile, results, payload, max_withdrawable, binding_label, status, persisted)
+        return self._to_out(
+            profile, results, payload, max_withdrawable, binding_label, status, persisted
+        )
+
 
     def _persist(
         self,
@@ -553,6 +558,50 @@ class AnalysisService:
         persisted: AnalysisResult | None,
     ) -> AnalysisResultOut:
         primary = results[0]
+        # 顶层字段必须与顶层状态一致。
+        #
+        # 共同约束模式下 status 取的是「所有情景中最保守的那个」，而 primary 只是
+        # 第一个情景（按当前计划）。如果直接复用 primary 的缺口与文案，就会出现
+        # 「状态=存在付款缺口，缺口金额=0，文案=资金安排可行」这种自相矛盾的组合。
+        # 因此共同约束模式的缺口取所有情景中最紧张的那个，文案取状态对应的文案。
+        if status is primary.status:
+            status_label = primary.status_label
+            payment_gap = primary.payment_gap_cents
+            buffer_gap = primary.buffer_gap_cents
+            limiting_timestamp = primary.limiting_timestamp
+            limiting_balance = primary.limiting_balance_cents
+            limiting_event_id = primary.limiting_event_id
+            limiting_event_title = primary.limiting_event_title
+            limiting_reason = primary.limiting_reason
+            minimum_balance = primary.minimum_balance_cents
+        else:
+            binding = next(
+                (item for item in results if item.status is status),
+                primary,
+            )
+            status_label = STATUS_LABELS[status]
+            payment_gap = max((item.payment_gap_cents for item in results), default=0)
+            buffer_gap = max((item.buffer_gap_cents for item in results), default=0)
+            limiting_timestamp = binding.limiting_timestamp
+            limiting_balance = binding.limiting_balance_cents
+            limiting_event_id = binding.limiting_event_id
+            limiting_event_title = binding.limiting_event_title
+            limiting_reason = binding.limiting_reason
+            minimum_balance = min(
+                (item.minimum_balance_cents for item in results), default=primary.minimum_balance_cents
+            )
+            if status is AnalysisStatus.PAYMENT_GAP:
+                limiting_reason = (
+                    "同时考虑这些情况后，至少一个情景即使不提用家庭资金，仍然存在付款缺口；"
+                    "可提用金额为 0 只表示没有安全金额，不代表资金安排可行。"
+                )
+            elif status is AnalysisStatus.BELOW_BUFFER:
+                limiting_reason = (
+                    "同时考虑这些情况后，至少一个情景会低于你设置的经营留底，当前不建议提用家庭资金。"
+                )
+            elif status is AnalysisStatus.INPUT_INCOMPLETE:
+                limiting_reason = "部分情景的收付款资料尚未确认，暂时无法给出共同结果。"
+
         curves = [
             ScenarioCurve(
                 label=item.label,
@@ -582,7 +631,7 @@ class AnalysisService:
             mode=payload.mode,
             mode_label=_scenario_kind_label(payload.mode),
             status=str(status),
-            status_label=primary.status_label,
+            status_label=status_label,
             max_withdrawable_cents=max_withdrawable,
             binding_label=binding_label,
             opening_balance_cents=primary.opening_balance_cents,
@@ -590,18 +639,18 @@ class AnalysisService:
             currency=profile.default_currency,
             snapshot_at=primary.snapshot_at,
             window_end_at=primary.window_end_at,
-            limiting_timestamp=primary.limiting_timestamp,
-            limiting_balance_cents=primary.limiting_balance_cents,
-            limiting_event_id=primary.limiting_event_id,
-            limiting_event_title=primary.limiting_event_title,
-            limiting_reason=primary.limiting_reason,
+            limiting_timestamp=limiting_timestamp,
+            limiting_balance_cents=limiting_balance,
+            limiting_event_id=limiting_event_id,
+            limiting_event_title=limiting_event_title,
+            limiting_reason=limiting_reason,
             pending_inflows_at_limit=[
                 item.to_dict() for item in primary.pending_inflows_at_limit
             ],
-            payment_gap_cents=primary.payment_gap_cents,
-            buffer_gap_cents=primary.buffer_gap_cents,
-            minimum_balance_cents=primary.minimum_balance_cents,
-            balance_floor_cents=primary.balance_floor_cents,
+            payment_gap_cents=payment_gap,
+            buffer_gap_cents=buffer_gap,
+            minimum_balance_cents=minimum_balance,
+            balance_floor_cents=minimum_balance,
             end_balance_cents=primary.end_balance_cents,
             opening_covers_buffer=primary.opening_covers_buffer,
             window_inflow_cents=primary.window_inflow_cents,
