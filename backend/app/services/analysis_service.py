@@ -1,0 +1,568 @@
+"""资金分析服务：装配引擎输入、持久化结果、结果失效标记。
+
+计算全部委托给 :mod:`app.services.cash_engine`。本模块只负责：
+* 从数据库读取期初余额、留底、现金事件
+* 组装 :class:`~app.services.cash_engine.EngineInput`
+* 把结果持久化为可追溯的 ``AnalysisResult``
+* 在任何影响金额计算的修改之后把旧结果标记为 ``stale``
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta
+
+from sqlalchemy import select, update
+from sqlalchemy.orm import Session
+
+from app.core.config import settings
+from app.core.errors import NotFound, ValidationFailed
+from app.models.cash import (
+    AnalysisResult,
+    CashEvent,
+    Scenario,
+    ScenarioEventOverride,
+)
+from app.models.merchant import MerchantProfile
+from app.schemas.analysis import (
+    AnalysisResultOut,
+    AnalysisRunRequest,
+    ScenarioCurve,
+    ScenarioOut,
+)
+from app.services.cash_engine import (
+    ENGINE_VERSION,
+    AnalysisStatus,
+    CashEventInput,
+    EngineInput,
+    EngineResult,
+    JointResult,
+    events_version_hash,
+    run_engine,
+    run_joint,
+)
+from app.utils.timeutil import WINDOW_DAYS, to_utc, utcnow
+
+MODE_CURRENT_PLAN = "current_plan"
+MODE_DELAYED = "delayed"
+MODE_JOINT = "joint"
+
+STALE_REASON_DEFAULT = "收付款事项或资金时点已变更"
+
+
+def _scenario_kind_label(kind: str) -> str:
+    return {
+        MODE_CURRENT_PLAN: "按当前计划",
+        MODE_DELAYED: "到账延迟",
+        MODE_JOINT: "共同约束",
+        "custom": "自定义情景",
+    }.get(kind, kind)
+
+
+class AnalysisService:
+    def __init__(self, db: Session) -> None:
+        self.db = db
+
+    # ------------------------------------------------------------------
+    # 输入装配
+    # ------------------------------------------------------------------
+    def load_events(self, merchant_id: str) -> list[CashEvent]:
+        rows = self.db.scalars(
+            select(CashEvent)
+            .where(CashEvent.merchant_id == merchant_id)
+            .order_by(CashEvent.scheduled_at.asc(), CashEvent.cash_key.asc())
+        ).all()
+        return list(rows)
+
+    @staticmethod
+    def to_input(event: CashEvent) -> CashEventInput:
+        return CashEventInput(
+            id=event.id,
+            cash_key=event.cash_key,
+            title=event.title,
+            amount_cents=event.amount_cents,
+            direction=event.direction,
+            scheduled_at=event.scheduled_at,
+            state=event.state,
+            event_type=event.event_type,
+            sequence_index=event.sequence_index_optional,
+            source_label=event.source_label,
+            current_version=event.current_version,
+            confirmed=event.confirmed,
+        )
+
+    def _reference_time(self, profile: MerchantProfile, requested: datetime | None) -> datetime:
+        if requested is not None:
+            return to_utc(requested)
+        from app.repositories.merchant_repo import AccountSnapshotRepository
+
+        snapshot = AccountSnapshotRepository(self.db).latest(profile.id)
+        return snapshot.snapshot_at if snapshot else utcnow()
+
+    def _opening_balance(self, profile: MerchantProfile) -> int:
+        from app.repositories.merchant_repo import AccountSnapshotRepository
+
+        snapshot = AccountSnapshotRepository(self.db).latest(profile.id)
+        return snapshot.opening_balance_cents if snapshot else 0
+
+    def build_inputs(
+        self,
+        profile: MerchantProfile,
+        *,
+        mode: str,
+        snapshot_at: datetime | None = None,
+        scenario_ids: list[str] | None = None,
+        delay_days: int = 3,
+        buffer_cents: int | None = None,
+    ) -> list[EngineInput]:
+        reference = self._reference_time(profile, snapshot_at)
+        opening = self._opening_balance(profile)
+        buffer = (
+            int(buffer_cents)
+            if buffer_cents is not None
+            else int(profile.default_buffer_amount_cents)
+        )
+        base_events = [self.to_input(event) for event in self.load_events(profile.id)]
+
+        if mode == MODE_CURRENT_PLAN:
+            return [
+                EngineInput(
+                    opening_balance_cents=opening,
+                    buffer_cents=buffer,
+                    snapshot_at=reference,
+                    events=base_events,
+                    label=_scenario_kind_label(MODE_CURRENT_PLAN),
+                )
+            ]
+
+        if mode == MODE_DELAYED:
+            return [
+                EngineInput(
+                    opening_balance_cents=opening,
+                    buffer_cents=buffer,
+                    snapshot_at=reference,
+                    events=self._delay_inflows(base_events, delay_days),
+                    label=_scenario_kind_label(MODE_DELAYED),
+                )
+            ]
+
+        if mode == MODE_JOINT:
+            return [
+                EngineInput(
+                    opening_balance_cents=opening,
+                    buffer_cents=buffer,
+                    snapshot_at=reference,
+                    events=base_events,
+                    label=_scenario_kind_label(MODE_CURRENT_PLAN),
+                ),
+                EngineInput(
+                    opening_balance_cents=opening,
+                    buffer_cents=buffer,
+                    snapshot_at=reference,
+                    events=self._delay_inflows(base_events, delay_days),
+                    label=_scenario_kind_label(MODE_DELAYED),
+                ),
+            ]
+
+        if mode == "scenarios":
+            inputs: list[EngineInput] = []
+            for scenario in self._load_scenarios(profile.id, scenario_ids):
+                inputs.append(self._scenario_input(scenario, opening, buffer, reference))
+            if not inputs:
+                raise ValidationFailed("请至少选择一个情景", code="NO_SCENARIO")
+            return inputs
+
+        raise ValidationFailed("不支持的分析模式", code="UNSUPPORTED_MODE")
+
+    @staticmethod
+    def _delay_inflows(events: list[CashEventInput], delay_days: int) -> list[CashEventInput]:
+        shift = timedelta(days=max(0, int(delay_days)))
+        shifted: list[CashEventInput] = []
+        for event in events:
+            if event.direction == "inflow" and event.scheduled_at is not None:
+                shifted.append(
+                    CashEventInput(
+                        id=event.id,
+                        cash_key=event.cash_key,
+                        title=event.title,
+                        amount_cents=event.amount_cents,
+                        direction=event.direction,
+                        scheduled_at=to_utc(event.scheduled_at) + shift,
+                        state=event.state,
+                        event_type=event.event_type,
+                        sequence_index=event.sequence_index,
+                        source_label=event.source_label,
+                        current_version=event.current_version,
+                        confirmed=event.confirmed,
+                    )
+                )
+            else:
+                shifted.append(event)
+        return shifted
+
+    def _load_scenarios(self, merchant_id: str, scenario_ids: list[str] | None) -> list[Scenario]:
+        statement = select(Scenario).where(Scenario.merchant_id == merchant_id)
+        if scenario_ids:
+            statement = statement.where(Scenario.id.in_(scenario_ids))
+        statement = statement.order_by(Scenario.created_at.asc())
+        return list(self.db.scalars(statement).all())
+
+    def _scenario_input(
+        self,
+        scenario: Scenario,
+        opening: int,
+        buffer: int,
+        reference: datetime,
+    ) -> EngineInput:
+        base = [self.to_input(event) for event in self.load_events(scenario.merchant_id)]
+        by_id = {item.id: item for item in base}
+        overrides = self.db.scalars(
+            select(ScenarioEventOverride).where(ScenarioEventOverride.scenario_id == scenario.id)
+        ).all()
+        for override in overrides:
+            current = by_id.get(override.cash_event_id)
+            if current is None:
+                continue
+            by_id[override.cash_event_id] = CashEventInput(
+                id=current.id,
+                cash_key=current.cash_key,
+                title=current.title,
+                amount_cents=(
+                    override.amount_cents_override
+                    if override.amount_cents_override is not None
+                    else current.amount_cents
+                ),
+                direction=override.direction_override or current.direction,
+                scheduled_at=(
+                    to_utc(override.scheduled_at_override)
+                    if override.scheduled_at_override is not None
+                    else current.scheduled_at
+                ),
+                state=override.state_override or current.state,
+                event_type=current.event_type,
+                sequence_index=current.sequence_index,
+                source_label=current.source_label,
+                current_version=current.current_version,
+                confirmed=current.confirmed,
+            )
+        return EngineInput(
+            opening_balance_cents=opening,
+            buffer_cents=buffer,
+            snapshot_at=reference,
+            events=list(by_id.values()),
+            label=scenario.name,
+        )
+
+    # ------------------------------------------------------------------
+    # 执行
+    # ------------------------------------------------------------------
+    def run(
+        self,
+        profile: MerchantProfile,
+        payload: AnalysisRunRequest,
+        *,
+        actor_id: str | None = None,
+        persist: bool = True,
+    ) -> AnalysisResultOut:
+        inputs = self.build_inputs(
+            profile,
+            mode=payload.mode,
+            snapshot_at=payload.snapshot_at,
+            scenario_ids=payload.scenario_ids,
+            delay_days=payload.delay_days,
+            buffer_cents=payload.buffer_cents,
+        )
+
+        if payload.mode == MODE_JOINT:
+            joint: JointResult = run_joint(inputs)
+            results = joint.scenario_results
+            max_withdrawable = joint.max_withdrawable_cents
+            binding_label = joint.binding_label
+            status = joint.status
+        else:
+            results = [run_engine(item) for item in inputs]
+            max_withdrawable = results[0].max_withdrawable_cents
+            binding_label = results[0].label
+            status = results[0].status
+
+        primary = results[0]
+        payload_dict = {
+            "mode": payload.mode,
+            "max_withdrawable_cents": max_withdrawable,
+            "binding_label": binding_label,
+            "scenarios": [item.to_dict() for item in results],
+        }
+
+        persisted: AnalysisResult | None = None
+        if persist:
+            persisted = self._persist(profile, primary, payload, payload_dict, actor_id)
+
+        return self._to_out(profile, results, payload, max_withdrawable, binding_label, status, persisted)
+
+    def _persist(
+        self,
+        profile: MerchantProfile,
+        primary: EngineResult,
+        payload: AnalysisRunRequest,
+        payload_dict: dict,
+        actor_id: str | None,
+    ) -> AnalysisResult:
+        from app.repositories.merchant_repo import AccountSnapshotRepository
+
+        self.mark_stale(profile.id, reason="已生成新的分析结果", commit=False)
+
+        snapshot = AccountSnapshotRepository(self.db).latest(profile.id)
+        row = AnalysisResult(
+            merchant_id=profile.id,
+            snapshot_id=snapshot.id if snapshot else None,
+            scenario_id=None,
+            scenario_ids=list(payload.scenario_ids or []),
+            mode=payload.mode,
+            status=str(primary.status),
+            max_withdrawable_cents=primary.max_withdrawable_cents,
+            opening_balance_cents=primary.opening_balance_cents,
+            buffer_cents=primary.buffer_cents,
+            snapshot_at=primary.snapshot_at,
+            window_end_at=primary.window_end_at,
+            limiting_timestamp=primary.limiting_timestamp,
+            limiting_balance_cents=primary.limiting_balance_cents,
+            limiting_event_id=primary.limiting_event_id,
+            payment_gap_cents=primary.payment_gap_cents,
+            buffer_gap_cents=primary.buffer_gap_cents,
+            payload=payload_dict,
+            events_version_hash=self._version_hash(profile.id),
+            is_stale=False,
+            engine_version=ENGINE_VERSION,
+            created_by=actor_id,
+        )
+        self.db.add(row)
+        self.db.commit()
+        self.db.refresh(row)
+        return row
+
+    def _version_hash(self, merchant_id: str) -> str:
+        return events_version_hash([self.to_input(event) for event in self.load_events(merchant_id)])
+
+    # ------------------------------------------------------------------
+    def mark_stale(
+        self,
+        merchant_id: str,
+        *,
+        reason: str = STALE_REASON_DEFAULT,
+        commit: bool = True,
+    ) -> int:
+        """把该商户所有未失效的分析结果标记为 stale。"""
+        result = self.db.execute(
+            update(AnalysisResult)
+            .where(AnalysisResult.merchant_id == merchant_id, AnalysisResult.is_stale.is_(False))
+            .values(is_stale=True, stale_reason=reason, updated_at=utcnow())
+        )
+        if commit:
+            self.db.commit()
+        return int(result.rowcount or 0)
+
+    def latest_result(self, merchant_id: str) -> AnalysisResult | None:
+        return self.db.scalar(
+            select(AnalysisResult)
+            .where(AnalysisResult.merchant_id == merchant_id)
+            .order_by(AnalysisResult.created_at.desc())
+            .limit(1)
+        )
+
+    def is_latest_stale(self, merchant_id: str) -> bool:
+        latest = self.latest_result(merchant_id)
+        if latest is None:
+            return False
+        if latest.is_stale:
+            return True
+        return latest.events_version_hash != self._version_hash(merchant_id)
+
+    # ------------------------------------------------------------------
+    def _to_out(
+        self,
+        profile: MerchantProfile,
+        results: list[EngineResult],
+        payload: AnalysisRunRequest,
+        max_withdrawable: int | None,
+        binding_label: str | None,
+        status: AnalysisStatus,
+        persisted: AnalysisResult | None,
+    ) -> AnalysisResultOut:
+        primary = results[0]
+        curves = [
+            ScenarioCurve(
+                label=item.label,
+                kind=payload.mode,
+                status=str(item.status),
+                status_label=item.status_label,
+                max_withdrawable_cents=item.max_withdrawable_cents,
+                limiting_timestamp=item.limiting_timestamp,
+                limiting_balance_cents=item.limiting_balance_cents,
+                limiting_event_id=item.limiting_event_id,
+                limiting_event_title=item.limiting_event_title,
+                limiting_reason=item.limiting_reason,
+                payment_gap_cents=item.payment_gap_cents,
+                buffer_gap_cents=item.buffer_gap_cents,
+                end_balance_cents=item.end_balance_cents,
+                points=[point.to_dict() for point in item.points],
+                pending_inflows_at_limit=[item2.to_dict() for item2 in item.pending_inflows_at_limit],
+                window_inflow_cents=item.window_inflow_cents,
+                window_outflow_cents=item.window_outflow_cents,
+            )
+            for item in results
+        ]
+
+        return AnalysisResultOut(
+            id=persisted.id if persisted else None,
+            merchant_id=profile.id,
+            mode=payload.mode,
+            mode_label=_scenario_kind_label(payload.mode),
+            status=str(status),
+            status_label=primary.status_label,
+            max_withdrawable_cents=max_withdrawable,
+            binding_label=binding_label,
+            opening_balance_cents=primary.opening_balance_cents,
+            buffer_cents=primary.buffer_cents,
+            currency=profile.default_currency,
+            snapshot_at=primary.snapshot_at,
+            window_end_at=primary.window_end_at,
+            limiting_timestamp=primary.limiting_timestamp,
+            limiting_balance_cents=primary.limiting_balance_cents,
+            limiting_event_id=primary.limiting_event_id,
+            limiting_event_title=primary.limiting_event_title,
+            limiting_reason=primary.limiting_reason,
+            pending_inflows_at_limit=[
+                item.to_dict() for item in primary.pending_inflows_at_limit
+            ],
+            payment_gap_cents=primary.payment_gap_cents,
+            buffer_gap_cents=primary.buffer_gap_cents,
+            minimum_balance_cents=primary.minimum_balance_cents,
+            balance_floor_cents=primary.balance_floor_cents,
+            end_balance_cents=primary.end_balance_cents,
+            opening_covers_buffer=primary.opening_covers_buffer,
+            window_inflow_cents=primary.window_inflow_cents,
+            window_outflow_cents=primary.window_outflow_cents,
+            pending_settlement_cents=primary.pending_settlement_cents,
+            scenarios=curves,
+            points=[point.to_dict() for point in primary.points],
+            validation_errors=primary.validation_errors,
+            excluded_event_ids=primary.excluded_event_ids,
+            engine_version=ENGINE_VERSION,
+            is_stale=False,
+            generated_at=utcnow(),
+        )
+
+    # ------------------------------------------------------------------
+    # 情景
+    # ------------------------------------------------------------------
+    def list_scenarios(self, merchant_id: str) -> list[ScenarioOut]:
+        rows = self._load_scenarios(merchant_id, None)
+        return [self._scenario_out(item) for item in rows]
+
+    def create_scenario(
+        self,
+        profile: MerchantProfile,
+        *,
+        name: str,
+        kind: str,
+        description: str | None,
+        actor_id: str,
+        overrides: list[dict] | None = None,
+    ) -> ScenarioOut:
+        scenario = Scenario(
+            merchant_id=profile.id,
+            name=name.strip(),
+            kind=kind,
+            description=description,
+            created_by=actor_id,
+        )
+        self.db.add(scenario)
+        self.db.flush()
+        for item in overrides or []:
+            self._upsert_override(scenario.id, item)
+        self.db.commit()
+        self.db.refresh(scenario)
+        return self._scenario_out(scenario)
+
+    def update_scenario(
+        self,
+        scenario: Scenario,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        overrides: list[dict] | None = None,
+    ) -> ScenarioOut:
+        if name is not None and name.strip():
+            scenario.name = name.strip()
+        if description is not None:
+            scenario.description = description
+        if overrides is not None:
+            for item in overrides:
+                self._upsert_override(scenario.id, item)
+        self.db.commit()
+        self.db.refresh(scenario)
+        return self._scenario_out(scenario)
+
+    def _upsert_override(self, scenario_id: str, data: dict) -> ScenarioEventOverride:
+        event_id = data.get("cash_event_id")
+        if not event_id:
+            raise ValidationFailed("情景覆盖必须指定收付款事项", code="MISSING_EVENT_ID")
+        existing = self.db.scalar(
+            select(ScenarioEventOverride).where(
+                ScenarioEventOverride.scenario_id == scenario_id,
+                ScenarioEventOverride.cash_event_id == event_id,
+            )
+        )
+        scheduled_at = data.get("scheduled_at")
+        if existing is None:
+            existing = ScenarioEventOverride(scenario_id=scenario_id, cash_event_id=event_id)
+            self.db.add(existing)
+        existing.scheduled_at_override = to_utc(scheduled_at) if scheduled_at else None
+        existing.amount_cents_override = data.get("amount_cents")
+        existing.direction_override = data.get("direction")
+        existing.state_override = data.get("state")
+        existing.note = data.get("note")
+        self.db.flush()
+        return existing
+
+    def require_scenario(self, scenario_id: str, merchant_id: str) -> Scenario:
+        row = self.db.get(Scenario, scenario_id)
+        if row is None or row.merchant_id != merchant_id:
+            raise NotFound("情景不存在")
+        return row
+
+    def delete_scenario(self, scenario: Scenario) -> None:
+        self.db.delete(scenario)
+        self.db.commit()
+
+    def _scenario_out(self, scenario: Scenario) -> ScenarioOut:
+        from app.schemas.analysis import ScenarioOverrideOut
+
+        return ScenarioOut(
+            id=scenario.id,
+            merchant_id=scenario.merchant_id,
+            name=scenario.name,
+            kind=scenario.kind,
+            description=scenario.description,
+            is_primary=scenario.is_primary,
+            created_at=scenario.created_at,
+            updated_at=scenario.updated_at,
+            overrides=[
+                ScenarioOverrideOut(
+                    cash_event_id=item.cash_event_id,
+                    scheduled_at=item.scheduled_at_override,
+                    amount_cents=item.amount_cents_override,
+                    direction=item.direction_override,
+                    state=item.state_override,
+                    note=item.note,
+                )
+                for item in scenario.overrides
+            ],
+        )
+
+
+def window_end_of(snapshot_at: datetime) -> datetime:
+    return to_utc(snapshot_at) + timedelta(days=WINDOW_DAYS)
+
+
+def ai_configured() -> bool:
+    return settings.ai_configured

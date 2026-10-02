@@ -131,3 +131,41 @@ class AuditRepository:
         if merchant_id:
             statement = statement.where(AuditLog.merchant_id == merchant_id)
         return list(self.db.scalars(statement).all())
+
+
+class AuditService:
+    """审计日志写入的统一入口。
+
+    禁止记录密码、Refresh Token、完整 API Key —— 由 :func:`app.core.logging.redact`
+    在写入前统一脱敏。
+    """
+
+    def __init__(self, db: Session) -> None:
+        self.db = db
+        self.repository = AuditRepository(db)
+
+    def record(
+        self,
+        action: str,
+        *,
+        actor: User | None = None,
+        actor_id: str | None = None,
+        actor_name: str | None = None,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
+        merchant_id: str | None = None,
+        metadata: dict | None = None,
+        ip_address: str | None = None,
+    ) -> AuditLog:
+        from app.core.logging import redact
+
+        return self.repository.log(
+            action=action,
+            actor_id=actor.id if actor else actor_id,
+            actor_name=actor.display_name if actor else actor_name,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            merchant_id=merchant_id,
+            metadata=redact(metadata or {}),
+            ip_address=ip_address,
+        )

@@ -46,6 +46,9 @@ STATE_CANCELLED = "cancelled"
 VALID_DIRECTIONS = (DIRECTION_INFLOW, DIRECTION_OUTFLOW)
 VALID_STATES = (STATE_SCHEDULED, STATE_INCLUDED_IN_OPENING, STATE_CANCELLED)
 
+#: 影响金额计算的字段。任何对它们的修改都必须保存旧版本并触发重算。
+MATERIAL_FIELDS = ("amount_cents", "scheduled_at", "direction", "state")
+
 
 class AnalysisStatus(StrEnum):
     OK = "OK"
@@ -556,6 +559,7 @@ __all__ = [
     "EngineInput",
     "EngineResult",
     "JointResult",
+    "MATERIAL_FIELDS",
     "PendingInflow",
     "STATE_CANCELLED",
     "STATE_INCLUDED_IN_OPENING",
