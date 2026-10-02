@@ -9,6 +9,7 @@ import { expect, test } from '@playwright/test';
 
 import {
   PASSWORD,
+  appUrl,
   btn,
   createMerchantFixture,
   gotoAuthed,
@@ -29,7 +30,7 @@ test.describe('认证', () => {
     const username = uniqueName('login');
     await registerViaUi(page, username, '登录测试店');
 
-    await page.goto('/settings');
+    await page.goto(appUrl('/settings'));
     await btn(page, '退出登录').first().click();
     await expect(page).toHaveURL(/\/login/, { timeout: 20_000 });
 
@@ -45,14 +46,14 @@ test.describe('认证', () => {
   });
 
   test('未登录访问业务页面会跳转到登录', async ({ page }) => {
-    await page.goto('/events');
+    await page.goto(appUrl('/events'));
     await expect(page).toHaveURL(/\/login/, { timeout: 20_000 });
   });
 
   test('刷新页面保持登录状态', async ({ page, request }) => {
     const fixture = await createMerchantFixture(request, 'refresh');
     await loginViaUi(page, fixture.user.username);
-    await page.goto('/today');
+    await page.goto(appUrl('/today'));
     await page.reload();
     await expect(page.getByText('今日决策').first()).toBeVisible({ timeout: 25_000 });
   });

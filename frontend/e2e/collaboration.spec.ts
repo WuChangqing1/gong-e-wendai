@@ -4,7 +4,16 @@
 
 import { expect, test } from '@playwright/test';
 
-import { PASSWORD, btn, createMerchantFixture, gotoAuthed, loginViaUi, uniqueName } from './helpers';
+import {
+  PASSWORD,
+  apiUrl,
+  appUrl,
+  btn,
+  createMerchantFixture,
+  gotoAuthed,
+  loginViaUi,
+  uniqueName,
+} from './helpers';
 
 test.describe('家庭协同', () => {
   test('创建家庭、生成邀请码、分享决策卡并接收反馈', async ({ page, request, browser }) => {
@@ -12,7 +21,7 @@ test.describe('家庭协同', () => {
 
     const memberRequest = request;
     const memberName = uniqueName('member');
-    const memberRegister = await memberRequest.post('/api/v1/auth/register', {
+    const memberRegister = await memberRequest.post(apiUrl('auth', 'register'), {
       headers: { 'X-Requested-With': 'XMLHttpRequest' },
       data: {
         username: memberName,
@@ -35,7 +44,7 @@ test.describe('家庭协同', () => {
     ).trim();
     expect(inviteCode).toMatch(/^[A-Z0-9]{8}$/);
 
-    const join = await memberRequest.post('/api/v1/households/join', {
+    const join = await memberRequest.post(apiUrl('households', 'join'), {
       headers: { 'X-Requested-With': 'XMLHttpRequest' },
       data: { invite_code: inviteCode, relation_label: '配偶' },
     });
@@ -55,7 +64,7 @@ test.describe('家庭协同', () => {
 
     const memberPage = await browser.newPage();
     await loginViaUi(memberPage, memberName);
-    await memberPage.goto('/family/cards');
+    await memberPage.goto(appUrl('/family/cards'));
     await expect(memberPage.getByText('家庭提用决策确认')).toBeVisible({ timeout: 25_000 });
     await expect(memberPage.getByText('今日可提用金额').first()).toBeVisible();
     await expect(memberPage.getByText('¥1,200.00').first()).toBeVisible();
@@ -66,7 +75,7 @@ test.describe('家庭协同', () => {
     await btn(memberPage, '评论').click();
     await expect(memberPage.getByText('评论已提交')).toBeVisible({ timeout: 15_000 });
 
-    await memberPage.goto('/events');
+    await memberPage.goto(appUrl('/events'));
     await expect(memberPage.getByText('没有访问权限')).toBeVisible({ timeout: 25_000 });
 
     await memberPage.close();
@@ -95,12 +104,12 @@ test.describe('经营咨询', () => {
   test('咨询人员受理核实，且无法访问经营数据', async ({ page, request }) => {
     const fixture = await createMerchantFixture(request, 'consultflow');
     const merchantContext = request;
-    const loginResponse = await merchantContext.post('/api/v1/auth/login', {
+    const loginResponse = await merchantContext.post(apiUrl('auth', 'login'), {
       headers: { 'X-Requested-With': 'XMLHttpRequest' },
       data: { username: fixture.user.username, password: PASSWORD },
     });
     expect(loginResponse.status()).toBe(200);
-    const caseResponse = await merchantContext.post('/api/v1/consultations', {
+    const caseResponse = await merchantContext.post(apiUrl('consultations'), {
       headers: { 'X-Requested-With': 'XMLHttpRequest' },
       data: {
         cash_event_id: fixture.eventIds['E2E-SETTLE-0001'],
@@ -112,7 +121,7 @@ test.describe('经营咨询', () => {
     expect(caseResponse.status(), await caseResponse.text()).toBe(201);
 
     const consultantName = uniqueName('consultant');
-    const consultantRegister = await request.post('/api/v1/auth/register', {
+    const consultantRegister = await request.post(apiUrl('auth', 'register'), {
       headers: { 'X-Requested-With': 'XMLHttpRequest' },
       data: {
         username: consultantName,
@@ -149,7 +158,7 @@ test.describe('经营咨询', () => {
     await btn(drawer, '标记为已核实').click();
     await expect(page.getByText('已填写核实结果，等待商户确认更正')).toBeVisible({ timeout: 15_000 });
 
-    await page.goto('/events');
+    await page.goto(appUrl('/events'));
     await expect(page.getByText('没有访问权限')).toBeVisible({ timeout: 25_000 });
 
   });

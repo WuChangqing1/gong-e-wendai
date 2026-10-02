@@ -12,7 +12,7 @@
 
 import { expect, test } from '@playwright/test';
 
-import { btn, clickInBrowser, createMerchantFixture, loginViaUi } from './helpers';
+import { appUrl, btn, clickInBrowser, createMerchantFixture, loginViaUi } from './helpers';
 
 test.describe('响应式与移动端', () => {
   test('底部核心导航出现且可以切页', async ({ page, request }) => {
@@ -98,7 +98,7 @@ test.describe('响应式与移动端', () => {
   });
 
   test('未登录访问在窄屏同样跳转登录', async ({ page }) => {
-    await page.goto('/family');
+    await page.goto(appUrl('/family'));
     await expect(page).toHaveURL(/\/login/, { timeout: 20_000 });
     await expect(page.locator('.gew-auth__form-inner')).toBeVisible();
   });

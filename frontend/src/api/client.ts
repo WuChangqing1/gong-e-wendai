@@ -13,7 +13,27 @@ import axios, {
 } from 'axios';
 import type { ApiErrorBody } from '@/types';
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
+/**
+ * API 基地址。
+ *
+ * 默认按「与前端同源、同一基路径」推导：前端构建在 `/` 时得到 `/api/v1`，
+ * 构建在 `/wendai/` 时得到 `/wendai/api/v1`。
+ *
+ * 这一点很关键：如果应用挂在父站点子路径下而 API 仍用根路径 `/api/v1`，
+ * 请求会被父站点上其他应用的接口接走（实测返回 502），登录与注册全部失败。
+ *
+ * 需要指向独立后端域名时，显式设置 `VITE_API_BASE_URL` 覆盖。
+ */
+function resolveApiBaseUrl(): string {
+  const configured = import.meta.env.VITE_API_BASE_URL;
+  if (configured && configured.trim()) return configured.trim();
+
+  const base = import.meta.env.BASE_URL || '/';
+  const normalised = base.endsWith('/') ? base : `${base}/`;
+  return `${normalised}api/v1`;
+}
+
+export const API_BASE_URL = resolveApiBaseUrl();
 
 export class ApiError extends Error {
   code: string;

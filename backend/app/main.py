@@ -11,6 +11,7 @@ SPA 回退规则：
 
 from __future__ import annotations
 
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -127,20 +128,55 @@ def create_app() -> FastAPI:
     return app
 
 
+def _detect_asset_prefix(index_file_path) -> str:  # noqa: ANN001
+    """从构建产物中推断静态资源前缀。
+
+    前端可以构建在根路径（``/assets/...``）或父站点的子路径下
+    （``/wendai/assets/...``）。这里读取 ``index.html`` 中第一个 ``/assets/``
+    引用，得到实际前缀，避免靠人工配置出错。
+
+    返回形如 ``/assets`` 或 ``/wendai/assets`` 的前缀。
+    """
+    try:
+        html = index_file_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return "/assets"
+    match = re.search(r'["\'](/?[\w\-./]*?/assets)/', html)
+    if not match:
+        return "/assets"
+    prefix = match.group(1)
+    if not prefix.startswith("/"):
+        prefix = "/" + prefix
+    return prefix.rstrip("/")
+
+
 def _mount_frontend(app: FastAPI) -> None:
-    """挂载前端 build 产物并配置 SPA 回退。"""
+    """挂载前端 build 产物并配置 SPA 回退。
+
+    同时支持两种部署形态：
+
+    * 根路径部署：``/``、``/assets/*``
+    * 父站点子路径部署：``/``、``/wendai/``、``/wendai/assets/*``
+
+    ``/api/*`` 未命中时始终返回 JSON 404，绝不返回 ``index.html``；
+    这一判断同时覆盖子路径形态（``/wendai/api/*``）。
+    """
     dist = settings.frontend_dist
     assets_dir = dist / "assets"
     index_file = dist / "index.html"
 
-    if not dist.exists():
+    if not dist.exists() or not index_file.exists():
         logger.info("未发现前端构建产物（%s），仅提供 API 服务", dist)
         return
 
-    if assets_dir.exists():
-        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+    asset_prefix = _detect_asset_prefix(index_file)
+    base_prefix = asset_prefix[: -len("/assets")] if asset_prefix.endswith("/assets") else ""
+    logger.info("前端静态资源前缀：%s（子路径：%s）", asset_prefix, base_prefix or "/")
 
-    # 前端 public 目录下的静态资源
+    if assets_dir.exists():
+        app.mount(asset_prefix, StaticFiles(directory=assets_dir), name="assets")
+
+    # 前端 public 目录下的静态资源（同时注册根路径与子路径）
     for name in ("favicon.svg", "favicon.ico", "logo.svg", "robots.txt"):
         candidate = dist / name
         if candidate.exists():
@@ -153,6 +189,8 @@ def _mount_frontend(app: FastAPI) -> None:
                 return _serve
 
             app.get(f"/{name}", include_in_schema=False)(_make())
+            if base_prefix:
+                app.get(f"{base_prefix}/{name}", include_in_schema=False)(_make())
 
     @app.get("/", include_in_schema=False)
     async def _index() -> FileResponse:
@@ -161,13 +199,36 @@ def _mount_frontend(app: FastAPI) -> None:
     @app.get("/{full_path:path}", include_in_schema=False, response_model=None)
     async def _spa_fallback(full_path: str):  # noqa: ANN202
         # /api/* 未命中时返回 API 404，绝不返回 index.html
-        if full_path.startswith("api/") or full_path == "api":
+        # 子路径部署时前缀为 /wendai/api/*
+        normalised = full_path.lstrip("/")
+        api_marker = API_PREFIX.lstrip("/")  # "api"
+        if normalised == api_marker or normalised.startswith(f"{api_marker}/"):
             return JSONResponse(
                 status_code=404,
                 content={"code": "NOT_FOUND", "message": "接口不存在", "details": {}},
             )
+        if base_prefix:
+            sub = base_prefix.lstrip("/")
+            if normalised == sub or normalised.startswith(f"{sub}/"):
+                if f"{api_marker}/" in normalised or normalised.endswith(f"/{api_marker}"):
+                    return JSONResponse(
+                        status_code=404,
+                        content={"code": "NOT_FOUND", "message": "接口不存在", "details": {}},
+                    )
+                # 子路径下的文件请求优先，其余交给 SPA 路由
+                relative = normalised[len(sub) :].lstrip("/")
+                if relative:
+                    candidate = (dist / relative).resolve()
+                    try:
+                        candidate.relative_to(dist.resolve())
+                    except ValueError:
+                        candidate = None  # type: ignore[assignment]
+                    if candidate is not None and candidate.is_file():
+                        return FileResponse(candidate)
+                return FileResponse(index_file)
+
         # 其余静态文件优先
-        candidate = (dist / full_path).resolve()
+        candidate = (dist / normalised).resolve()
         try:
             candidate.relative_to(dist.resolve())
         except ValueError:
