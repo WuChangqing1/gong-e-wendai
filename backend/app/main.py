@@ -155,8 +155,8 @@ def _mount_frontend(app: FastAPI) -> None:
     async def _index() -> FileResponse:
         return FileResponse(index_file)
 
-    @app.get("/{full_path:path}", include_in_schema=False)
-    async def _spa_fallback(full_path: str) -> FileResponse | JSONResponse:
+    @app.get("/{full_path:path}", include_in_schema=False, response_model=None)
+    async def _spa_fallback(full_path: str):  # noqa: ANN202
         # /api/* 未命中时返回 API 404，绝不返回 index.html
         if full_path.startswith("api/") or full_path == "api":
             return JSONResponse(

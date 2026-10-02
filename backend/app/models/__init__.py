@@ -33,6 +33,7 @@ from app.models.household import (
     HouseholdCardRecipient,
     HouseholdMembership,
 )
+from app.models.imports import BATCH_COMMITTED, BATCH_PREVIEW, ImportBatch
 from app.models.merchant import (
     SOURCE_AI_EXTRACT,
     SOURCE_CONSULTATION,
@@ -56,6 +57,8 @@ __all__ = [
     "ALL_ROLES",
     "AnalysisResult",
     "AuditLog",
+    "BATCH_COMMITTED",
+    "BATCH_PREVIEW",
     "Base",
     "BusinessAccountSnapshot",
     "CARD_TYPES",
@@ -74,6 +77,7 @@ __all__ = [
     "HouseholdCardReaction",
     "HouseholdCardRecipient",
     "HouseholdMembership",
+    "ImportBatch",
     "MATERIAL_FIELDS",
     "MEMBERSHIP_STATUSES",
     "MerchantProfile",
