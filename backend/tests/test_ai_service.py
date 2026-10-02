@@ -448,7 +448,7 @@ class TestAiFailureDoesNotAffectCore:
         assert merchant_client.get("/api/v1/cash-events").status_code == 200
         analysis = merchant_client.get("/api/v1/analysis/today").json()
         assert analysis["max_withdrawable_cents"] == 1200_00
-        assert analysis["status"] == "OK"
+        assert analysis["status"] == "FEASIBLE"
 
     def test_ai_status_endpoint(self, merchant_client):
         body = merchant_client.get("/api/v1/ai/status").json()

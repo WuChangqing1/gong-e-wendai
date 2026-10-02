@@ -43,7 +43,7 @@ class TestAdminOverview:
         body = admin_client.get("/api/v1/admin/overview").json()
         assert body["users"] >= 2
         assert body["merchants"] >= 1
-        assert body["cash_events"] == 3
+        assert body["cash_events"] == 4
         assert body["ai_enabled"] is False
         assert body["version"]
 

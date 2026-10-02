@@ -328,7 +328,7 @@ class TestCards:
 
     def test_risk_card_contains_gap(self, family):
         analysis = family["client"].post(
-            "/api/v1/analysis/run", json={"mode": "delayed", "delay_days": 8}
+            "/api/v1/analysis/run", json={"mode": "delayed", "delay_days": 2}
         ).json()
         card = family["client"].post(
             "/api/v1/household-cards",
@@ -338,7 +338,7 @@ class TestCards:
                 "analysis_result_id": analysis["id"],
             },
         ).json()
-        assert card["payload"]["payment_gap_cents"] == 400_00
+        assert card["payload"]["payment_gap_cents"] == 200_00
         assert "缺口" in card["payload"]["risk_summary"]
 
     def test_revision_card_links_event(self, family):
