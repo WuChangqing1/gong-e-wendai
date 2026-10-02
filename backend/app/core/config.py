@@ -32,10 +32,24 @@ def _resolve_path(value: str, *, default_relative_to: Path) -> Path:
 
 
 class Settings(BaseSettings):
-    """Runtime settings for the backend application."""
+    """Runtime settings for the backend application.
+
+    配置优先级（高 → 低）：
+
+    1. 真实进程环境变量（systemd ``EnvironmentFile`` / ``export`` / docker ``-e``）
+    2. ``.env`` 文件（本地开发）
+    3. 字段默认值
+
+    生产环境（``APP_ENV=production``）**不读取** ``.env`` 文件，
+    避免误把开发配置带进生产；此时所有配置都必须由进程环境变量提供。
+    """
 
     model_config = SettingsConfigDict(
-        env_file=(PROJECT_ROOT / ".env", BACKEND_DIR / ".env"),
+        # 生产环境忽略 .env 文件，只使用真实环境变量
+        env_file=None if os.environ.get("APP_ENV", "").lower() in {"production", "prod"} else (
+            PROJECT_ROOT / ".env",
+            BACKEND_DIR / ".env",
+        ),
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,

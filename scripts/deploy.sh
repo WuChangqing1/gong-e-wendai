@@ -15,7 +15,7 @@ APP_NAME="gong-e-wendai"
 REPO_URL="${REPO_URL:-git@github.com:WuChangqing1/gong-e-wendai.git}"
 APP_DIR="${APP_DIR:-$HOME/apps/$APP_NAME}"
 DATA_DIR="${DATA_DIR:-$HOME/apps/$APP_NAME-data}"
-PORT="${PORT:-18082}"
+PORT="${PORT:-18088}"
 
 DO_PULL=1
 CHECK_ONLY=0
@@ -118,7 +118,7 @@ if [ -x "$APP_DIR/scripts/restart.sh" ]; then
   bash "$APP_DIR/scripts/restart.sh"
 else
   echo "未找到 scripts/restart.sh，请使用 systemd 或手动启动：" >&2
-  echo "  uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1" >&2
+  echo "  uvicorn app.main:app --host 127.0.0.1 --port 18089 --workers 1" >&2
 fi
 
 log "健康检查"

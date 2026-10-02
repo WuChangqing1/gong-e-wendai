@@ -1,0 +1,30 @@
+# 工 e 稳袋 (gong-e-wendai) — systemd user service 模板
+#
+# 部署方式（服务器上执行）：
+#   mkdir -p ~/.config/systemd/user
+#   cp docker/gong-e-wendai.service ~/.config/systemd/user/gong-e-wendai.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now gong-e-wendai
+#   sudo loginctl enable-linger $USER    # 未登录时也保持运行
+#
+# 说明：
+# * 应用只监听 127.0.0.1:18089，由 Nginx 在 18088 上反向代理对外提供。
+# * SQLite 模式必须保持 --workers 1，避免并发写入冲突。
+# * 配置全部来自 EnvironmentFile，代码目录与持久数据目录分离。
+
+[Unit]
+Description=gong-e-wendai (工 e 稳袋) — 小微经营资金与家庭协同决策系统
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/apps/gong-e-wendai/backend
+EnvironmentFile=%h/apps/gong-e-wendai/.env.production
+ExecStart=%h/apps/gong-e-wendai/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 18089 --workers 1
+Restart=always
+RestartSec=3
+StandardOutput=append:%h/apps/gong-e-wendai-data/logs/service.log
+StandardError=append:%h/apps/gong-e-wendai-data/logs/service.log
+
+[Install]
+WantedBy=default.target

@@ -26,8 +26,8 @@ if [ -f "$APP_DIR/.env.production" ]; then
   set +a
 fi
 
-HOST="${APP_HOST:-0.0.0.0}"
-PORT="${APP_PORT:-18082}"
+HOST="${APP_HOST:-127.0.0.1}"
+PORT="${APP_PORT:-18089}"
 
 is_running() {
   [ -f "$PID_FILE" ] || return 1

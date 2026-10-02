@@ -78,7 +78,7 @@ def main() -> int:
         return 1
 
     print("\n构建检查通过。生产启动命令：")
-    print("  uvicorn app.main:app --host 0.0.0.0 --port 18082 --workers 1")
+    print("  uvicorn app.main:app --host 127.0.0.1 --port 18089 --workers 1")
     return 0
 
 
