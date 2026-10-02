@@ -1,25 +1,36 @@
-"""AI Provider Layer。
+"""AI Provider Layer（正式接入智谱 GLM）。
 
-设计目标：业务代码不绑定任何一家模型厂商。
+设计目标：业务代码不绑定任何一家模型厂商，但默认供应商是智谱 GLM。
 
-* 统一通过 :class:`AIService` 暴露能力（``extract_cash_event`` /
-  ``explain_analysis`` / ``draft_consultation``）
-* 使用 OpenAI-compatible HTTP API，厂商差异只体现在环境变量
-  （``AI_BASE_URL`` / ``AI_MODEL`` / ``AI_API_KEY``）
+* 统一通过 :class:`AIService` 暴露能力：
+
+  - :meth:`AIService.extract_cash_event_from_text`
+  - :meth:`AIService.extract_cash_event_from_image`
+  - :meth:`AIService.explain_analysis`
+  - :meth:`AIService.draft_consultation`
+
+* 文本任务使用 ``GLM_TEXT_MODEL``（默认 ``glm-4.5-air``）
+* 图片任务使用 ``GLM_VISION_MODEL``（默认 ``glm-4.6v``）
+* 底层是 OpenAI-compatible HTTP API；供应商差异只体现在环境变量
 * 超时、无 Key、HTTP 失败、返回非法 JSON、网络失败都会抛出
   :class:`~app.core.errors.AIServiceError`，由上层转换为"智能服务暂时不可用"，
   **绝不影响**登录、事件管理、CSV、现金流计算、家庭协同与经营咨询
 
-硬性约束：
+硬性约束
+--------
 * AI 不得重新计算金额、不得修改引擎结果、不得猜测未知金额或时间、
   不得进行信用评分或违约预测、不得直接写入未经确认的现金事件
 * AI 返回的新增金额（不在输入里的）会被后端过滤，并在响应中标注
+* 密钥只以 ``SecretStr`` 保存，绝不进入日志、Traceback、API 响应或 Git
 """
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import re
+import time
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any, Protocol
@@ -35,9 +46,23 @@ from app.utils.timeutil import parse_datetime, utcnow
 
 logger = get_logger(__name__)
 
+#: 允许的图片类型与大小
+ALLOWED_IMAGE_TYPES = ("image/png", "image/jpeg", "image/webp")
+
+#: 智谱不支持 temperature=0；低随机业务任务使用最小合理非零值。
+TEXT_TEMPERATURE = 0.1
+VISION_TEMPERATURE = 0.1
+EXPLAIN_TEMPERATURE = 0.2
+DRAFT_TEMPERATURE = 0.2
+
+#: 只对限流与临时故障重试
+RETRYABLE_STATUS = (429, 500, 502, 503, 504)
+#: 参数或鉴权问题不重试：重试不会变好
+FATAL_STATUS = (400, 401, 403, 404, 422)
+
 #: 系统提示词：明确禁止重新计算、新增事实、猜测与承诺
 EXTRACT_SYSTEM_PROMPT = """你是「工 e 稳袋」的结构化信息提取助手，服务于中国小微经营者。
-你的唯一任务是把用户粘贴的一段中文原文，整理成一条收付款事项的结构化 JSON。
+你的唯一任务是把用户提供的原文（文字或图片中的文字）整理成一条收付款事项的结构化 JSON。
 
 必须遵守：
 1. 只提取原文中明确出现的信息，禁止推测、补全或编造任何金额与日期。
@@ -45,13 +70,41 @@ EXTRACT_SYSTEM_PROMPT = """你是「工 e 稳袋」的结构化信息提取助�
 3. scheduled_at 必须是 ISO-8601 时间字符串；原文只有日期时用当地时间的 09:00。
 4. direction 只能是 "inflow"（收入）或 "outflow"（支出）。
 5. state 固定为 "scheduled"。
-6. 如果原文没有明确金额或时间，对应字段返回 null，并在 warnings 中说明。
-7. 禁止进行信用评分、违约预测、贷款建议或收入预测。
-8. 只输出 JSON，不要输出解释文字、不要使用 Markdown 代码块。
+6. event_type 只能是：settlement / sale_receipt / supplier_payment / rent / refund /
+   payroll / utility / tax / loan_repayment / platform_fee / transfer_in /
+   transfer_out / other_inflow / other_outflow。
+7. channel 是结算或收款渠道（如"微信支付""支付宝""银行卡"），原文没写就返回 null。
+8. 如果原文没有明确金额或时间，对应字段返回 null，并在 warnings 中说明。
+9. 禁止进行信用评分、违约预测、贷款建议或收入预测。
+10. 只输出 JSON，不要输出解释文字、不要使用 Markdown 代码块。
 
 输出 JSON 结构：
 {"title": "", "direction": "inflow", "amount_cents": 0, "scheduled_at": "",
- "state": "scheduled", "source_label": "", "confidence": {}, "warnings": []}
+ "state": "scheduled", "event_type": "other_inflow", "source_label": "",
+ "channel": null, "confidence": {}, "warnings": []}
+"""
+
+IMAGE_EXTRACT_SYSTEM_PROMPT = """你是「工 e 稳袋」的截图信息提取助手，服务于中国小微经营者。
+用户会上传一张结算通知、付款通知或收付款凭证的截图。
+请只读取截图中清晰可见的文字信息，整理成一条收付款事项的结构化 JSON。
+
+必须遵守：
+1. 只提取截图中能看清的信息，看不清或没有的信息一律返回 null，禁止猜测。
+2. amount_cents 必须是整数分（元 × 100）。截图里的金额通常是元，请换算成分。
+3. scheduled_at 必须是 ISO-8601 时间字符串；只有日期时用当地时间的 09:00。
+4. direction 只能是 "inflow" 或 "outflow"；看不出收支方向时返回 null。
+5. event_type 只能是：settlement / sale_receipt / supplier_payment / rent / refund /
+   payroll / utility / tax / loan_repayment / platform_fee / transfer_in /
+   transfer_out / other_inflow / other_outflow。
+6. channel 填截图中的收款渠道，例如"微信支付""支付宝""银行卡"；没有则 null。
+7. 在 warnings 中逐条说明哪些字段看不清或需要用户核对。
+8. 禁止进行信用评分、违约预测、贷款建议或收入预测。
+9. 只输出 JSON，不要输出解释文字、不要使用 Markdown 代码块。
+
+输出 JSON 结构：
+{"title": "", "direction": "inflow", "amount_cents": 0, "scheduled_at": "",
+ "state": "scheduled", "event_type": "other_inflow", "source_label": "",
+ "channel": null, "confidence": {}, "warnings": []}
 """
 
 EXPLAIN_SYSTEM_PROMPT = """你是「工 e 稳袋」的说明助手，服务于中国小微经营者。
@@ -82,18 +135,22 @@ class ExtractedEvent(BaseModel):
     """AI 提取结果（严格校验）。"""
 
     title: str = Field(default="")
-    direction: str = Field(default="inflow")
+    direction: str | None = Field(default="inflow")
     amount_cents: int | None = None
     scheduled_at: str | None = None
     state: str = "scheduled"
+    event_type: str = "other_inflow"
     source_label: str | None = None
+    channel: str | None = None
     confidence: dict[str, float] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
 
     @field_validator("direction")
     @classmethod
-    def _check_direction(cls, value: str) -> str:
-        cleaned = (value or "").strip().lower()
+    def _check_direction(cls, value: Any) -> Any:
+        if value in (None, "", "null"):
+            return None
+        cleaned = str(value).strip().lower()
         if cleaned not in ("inflow", "outflow"):
             raise ValueError("direction 只能是 inflow 或 outflow")
         return cleaned
@@ -105,6 +162,56 @@ class ExtractedEvent(BaseModel):
         if cleaned not in ("scheduled", "included_in_opening", "cancelled"):
             return "scheduled"
         return cleaned
+
+    @field_validator("event_type")
+    @classmethod
+    def _check_event_type(cls, value: str) -> str:
+        from app.models.cash import EVENT_TYPES
+
+        cleaned = (value or "").strip().lower()
+        return cleaned if cleaned in EVENT_TYPES else "other_inflow"
+
+    @field_validator("channel")
+    @classmethod
+    def _check_channel(cls, value: Any) -> Any:
+        if value in (None, "", "null", "无", "未知"):
+            return None
+        return str(value).strip()[:64]
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def _coerce_confidence(cls, value: Any) -> Any:
+        """容忍模型把 confidence 写成数字或字符串：不能因此丢掉整条结果。"""
+        if not isinstance(value, dict):
+            return {}
+        cleaned: dict[str, float] = {}
+        for key, item in value.items():
+            try:
+                cleaned[str(key)] = float(item)
+            except (TypeError, ValueError):
+                continue
+        return cleaned
+
+    @field_validator("warnings", mode="before")
+    @classmethod
+    def _coerce_warnings(cls, value: Any) -> Any:
+        """容忍模型写成单个字符串或 null。"""
+        if value in (None, "", "null"):
+            return []
+        if isinstance(value, str):
+            return [value]
+        if isinstance(value, list):
+            return [str(item) for item in value if str(item).strip()]
+        return [str(value)]
+
+    @field_validator("title", "source_label", mode="before")
+    @classmethod
+    def _coerce_text(cls, value: Any) -> Any:
+        if value is None:
+            return ""
+        if isinstance(value, (int, float)):
+            return str(value)
+        return value
 
     @field_validator("amount_cents", mode="before")
     @classmethod
@@ -154,24 +261,54 @@ class ExtractedEventResult:
 class ChatClient(Protocol):
     """可替换的对话补全客户端（便于测试注入测试替身）。"""
 
-    def complete(self, *, system: str, user: str) -> str: ...
+    def complete(
+        self,
+        *,
+        system: str,
+        user: str,
+        temperature: float = TEXT_TEMPERATURE,
+        image: ImageInput | None = None,
+    ) -> str: ...
 
 
-class OpenAICompatibleClient:
-    """基于 OpenAI-compatible HTTP API 的客户端。"""
+@dataclass(frozen=True, slots=True)
+class ImageInput:
+    """待识别的图片。只保存在内存与私有上传目录，绝不进入公开静态资源。"""
+
+    data: bytes
+    media_type: str
+
+
+class GLMOpenAICompatibleClient:
+    """智谱 GLM 的 OpenAI-compatible 客户端，同时支持文本与多模态。"""
 
     def __init__(
         self,
         *,
         base_url: str,
         api_key: str,
-        model: str,
-        timeout: float,
+        text_model: str = "",
+        vision_model: str = "",
+        timeout: float = 30.0,
+        vision_timeout: float = 45.0,
+        max_tokens: int = 1024,
+        max_retries: int = 2,
+        model: str | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
-        self.api_key = api_key
-        self.model = model
+        self._api_key = api_key
+        # ``model`` 是旧参数名，等价于同时指定文本与视觉模型
+        self.text_model = text_model or model or ""
+        self.vision_model = vision_model or model or ""
         self.timeout = timeout
+        self.vision_timeout = vision_timeout
+        self.max_tokens = max_tokens
+        self.max_retries = max(0, int(max_retries))
+
+    @property
+    def model(self) -> str:
+        """向后兼容：默认文本模型。"""
+        return self.text_model
 
     @property
     def endpoint(self) -> str:
@@ -179,42 +316,120 @@ class OpenAICompatibleClient:
             return self.base_url
         return f"{self.base_url}/chat/completions"
 
-    def complete(self, *, system: str, user: str) -> str:
-        payload = {
-            "model": self.model,
+    def complete(
+        self,
+        *,
+        system: str,
+        user: str,
+        temperature: float = TEXT_TEMPERATURE,
+        image: ImageInput | None = None,
+    ) -> str:
+        use_vision = image is not None
+        model = self.vision_model if use_vision else self.text_model
+        if not model:
+            raise AIServiceError("智能服务尚未配置")
+
+        content: Any = user
+        if image is not None:
+            content = [
+                {"type": "text", "text": user},
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": _data_url(image),
+                    },
+                },
+            ]
+
+        payload: dict[str, Any] = {
+            "model": model,
             "messages": [
                 {"role": "system", "content": system},
-                {"role": "user", "content": user},
+                {"role": "user", "content": content},
             ],
-            "temperature": 0,
+            # 智谱不支持 temperature=0，低随机任务用最小合理非零值
+            "temperature": float(temperature),
             "stream": False,
+            # 这些任务不需要复杂推理，关闭思考以免浪费额度
+            "thinking": {"type": "disabled"},
         }
+        if self.max_tokens > 0:
+            payload["max_tokens"] = self.max_tokens
+
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {self._api_key}",
         }
-        try:
-            with httpx.Client(timeout=self.timeout) as client:
-                response = client.post(self.endpoint, json=payload, headers=headers)
-        except httpx.TimeoutException as exc:
-            raise AIServiceError("智能服务响应超时") from exc
-        except httpx.HTTPError as exc:
-            raise AIServiceError("智能服务网络异常") from exc
+        timeout = self.vision_timeout if use_vision else self.timeout
 
-        if response.status_code >= 400:
-            # 不记录响应正文，避免泄露密钥或内部信息
-            logger.warning("AI provider returned HTTP %s", response.status_code)
-            raise AIServiceError("智能服务返回异常状态")
+        last_error: Exception | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                with httpx.Client(timeout=timeout) as client:
+                    response = client.post(self.endpoint, json=payload, headers=headers)
+            except httpx.TimeoutException as exc:
+                last_error = exc
+                if attempt < self.max_retries:
+                    time.sleep(min(2.0, 0.5 * (2**attempt)))
+                    continue
+                raise AIServiceError("智能服务响应超时") from exc
+            except httpx.HTTPError as exc:
+                last_error = exc
+                if attempt < self.max_retries:
+                    time.sleep(min(2.0, 0.5 * (2**attempt)))
+                    continue
+                raise AIServiceError("智能服务网络异常") from exc
 
-        try:
-            data = response.json()
-        except ValueError as exc:
-            raise AIServiceError("智能服务返回内容无法解析") from exc
+            if response.status_code in RETRYABLE_STATUS and attempt < self.max_retries:
+                # 只记录状态码，绝不记录响应正文（可能含敏感内容）
+                logger.warning("AI provider returned HTTP %s, retrying", response.status_code)
+                time.sleep(min(4.0, 0.5 * (2**attempt)))
+                continue
 
-        try:
-            return str(data["choices"][0]["message"]["content"])
-        except (KeyError, IndexError, TypeError) as exc:
-            raise AIServiceError("智能服务返回结构不符合预期") from exc
+            if response.status_code >= 400:
+                # 400/401/403 属于参数或鉴权问题，重试不会变好
+                logger.warning(
+                    "AI provider returned HTTP %s%s",
+                    response.status_code,
+                    " (fatal)" if response.status_code in FATAL_STATUS else "",
+                )
+                raise AIServiceError("智能服务返回异常状态")
+
+            try:
+                data = response.json()
+            except ValueError as exc:
+                raise AIServiceError("智能服务返回内容无法解析") from exc
+
+            try:
+                text = str(data["choices"][0]["message"]["content"])
+            except (KeyError, IndexError, TypeError) as exc:
+                raise AIServiceError("智能服务返回结构不符合预期") from exc
+
+            _record_usage(data, model=model, use_vision=use_vision)
+            return text
+
+        raise AIServiceError("智能服务暂时不可用") from last_error
+
+
+def _data_url(image: ImageInput) -> str:
+    encoded = base64.b64encode(image.data).decode("ascii")
+    return f"data:{image.media_type};base64,{encoded}"
+
+
+def _record_usage(data: dict[str, Any], *, model: str, use_vision: bool) -> None:
+    """记录调用审计。
+
+    只记录：模型、是否视觉、状态、token 用量。
+    **不记录**密钥、不记录完整 prompt、不记录完整响应。
+    """
+    usage = data.get("usage") or {}
+    logger.info(
+        "ai.call model=%s vision=%s prompt_tokens=%s completion_tokens=%s",
+        model,
+        use_vision,
+        usage.get("prompt_tokens"),
+        usage.get("completion_tokens"),
+    )
 
 
 class AIService:
@@ -233,36 +448,43 @@ class AIService:
             return self._client
         if not settings.ai_configured:
             raise AIServiceError("智能服务尚未配置")
-        return OpenAICompatibleClient(
-            base_url=settings.ai_base_url,
-            api_key=settings.ai_api_key,
-            model=settings.ai_model,
-            timeout=settings.ai_timeout_seconds,
+        return GLMOpenAICompatibleClient(
+            base_url=settings.resolved_ai_base_url,
+            api_key=settings.resolved_ai_api_key,
+            text_model=settings.text_model,
+            vision_model=settings.vision_model,
+            timeout=settings.glm_timeout_seconds,
+            vision_timeout=settings.glm_vision_timeout_seconds,
+            max_tokens=settings.glm_max_tokens,
+            max_retries=settings.glm_max_retries,
         )
 
     def status(self) -> dict[str, Any]:
-        return {
-            "enabled": bool(settings.ai_enabled),
-            "configured": settings.ai_configured,
-            "available": settings.ai_configured,
-            "model": settings.ai_model if settings.ai_configured else None,
-            "provider": "openai-compatible",
-        }
+        """对外状态。**绝不**包含密钥、密钥前后缀或长度。"""
+        return settings.ai_status_public()
 
     # ------------------------------------------------------------------
-    def extract_cash_event(self, text: str) -> ExtractedEventResult:
-        """把自然语言整理成一条待确认的收付款事项。
+    def _extract_event(
+        self,
+        *,
+        system: str,
+        user: str,
+        raw_source_text: str,
+        image: ImageInput | None = None,
+        temperature: float = TEXT_TEMPERATURE,
+        verify_amount_against_source: bool = True,
+    ) -> ExtractedEventResult:
+        try:
+            raw = self.client().complete(
+                system=system, user=user, temperature=temperature, image=image
+            )
+        except AIServiceError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - 供应商异常一律降级为可用提示
+            # 任何未预期的供应商异常都不得冒泡成 500：统一变成「智能服务暂时不可用」
+            logger.warning("AI provider raised %s", type(exc).__name__)
+            raise AIServiceError("智能服务暂时不可用") from exc
 
-        **不会直接入库**：调用方必须让用户确认后再写入。
-        """
-        cleaned = (text or "").strip()
-        if len(cleaned) < 4:
-            raise AIServiceError("请提供更完整的原文")
-
-        raw = self.client().complete(
-            system=EXTRACT_SYSTEM_PROMPT,
-            user=f"原文：\n{cleaned}\n\n现在输出 JSON。",
-        )
         payload = _load_json_object(raw)
 
         try:
@@ -271,37 +493,96 @@ class AIService:
             logger.warning("AI extract validation failed: %s", exc.error_count())
             raise AIServiceError("智能服务返回的内容不符合要求，请手动录入") from exc
 
-        # 金额必须能在原文中找到，否则视为"猜测"并剔除
+        warnings = list(event.warnings)
         filtered: list[str] = []
+
+        if event.amount_cents is not None and event.amount_cents <= 0:
+            # 0 元或负数的收付款事项没有业务含义：模型看不清金额时会返回 0，
+            # 直接采用会在页面上显示成一条「0 元」事项，必须清空并要求补填。
+            filtered.append(_format_cents(event.amount_cents))
+            event = event.model_copy(update={"amount_cents": None})
+            warnings.append("识别结果里的金额不是有效的正数，已清空，请手动填写。")
+
         if event.amount_cents is not None:
-            if not _amount_appears_in_text(event.amount_cents, cleaned):
+            if verify_amount_against_source and not _amount_appears_in_text(
+                event.amount_cents, raw_source_text
+            ):
+                # 文字来源必须能逐字核对；对不上说明是猜测，直接清空
                 filtered.append(_format_cents(event.amount_cents))
-                event = event.model_copy(
-                    update={
-                        "amount_cents": None,
-                        "warnings": [
-                            *event.warnings,
-                            "原文中没有找到与提取金额一致的数字，已清空该金额，请手动确认。",
-                        ],
-                    }
+                event = event.model_copy(update={"amount_cents": None})
+                warnings.append(
+                    "原文中没有找到与提取金额一致的数字，已清空该金额，请手动确认。"
+                )
+            elif image is not None:
+                # 图片来源无法做逐字核对：保留候选值，但必须让用户明确核对
+                warnings.append(
+                    f"截图识别的金额为 {_format_cents(event.amount_cents)}，请与截图核对后再保存。"
                 )
 
-        if event.scheduled_at is None:
-            event = event.model_copy(
-                update={
-                    "warnings": [
-                        *event.warnings,
-                        "原文中没有明确的时间，请手动填写预计时间。",
-                    ]
-                }
-            )
+        if event.direction is None:
+            warnings.append("无法判断这笔款项是收入还是支出，请手动选择。")
 
+        if not event.title.strip():
+            warnings.append("没有识别到事项名称，请手动填写。")
+
+        if event.scheduled_at is None:
+            warnings.append("原文中没有明确的时间，请手动填写预计时间。")
+
+        event = event.model_copy(update={"warnings": warnings})
         return ExtractedEventResult(
             event=event,
-            raw_text=cleaned,
+            raw_text=raw_source_text,
             filtered_amounts=filtered,
-            used_fields=["text"],
+            used_fields=["image"] if image is not None else ["text"],
         )
+
+    def extract_cash_event_from_text(self, text: str) -> ExtractedEventResult:
+        """粘贴文字 → 待确认的收付款事项。**不会直接入库。**"""
+        cleaned = (text or "").strip()
+        if len(cleaned) < 4:
+            raise AIServiceError("请提供更完整的原文")
+        if len(cleaned) > settings.ai_text_max_chars:
+            raise AIServiceError(
+                f"文字太长了，请精简到 {settings.ai_text_max_chars} 字以内"
+            )
+        return self._extract_event(
+            system=EXTRACT_SYSTEM_PROMPT,
+            user=f"原文：\n{cleaned}\n\n现在输出 JSON。",
+            raw_source_text=cleaned,
+            temperature=TEXT_TEMPERATURE,
+        )
+
+    def extract_cash_event_from_image(
+        self, data: bytes, *, media_type: str
+    ) -> ExtractedEventResult:
+        """上传截图 → 待确认的收付款事项。**不会直接入库。**"""
+        if not data:
+            raise AIServiceError("请选择要识别的图片")
+        if media_type not in ALLOWED_IMAGE_TYPES:
+            raise AIServiceError("只支持 PNG、JPEG、WEBP 格式的截图")
+        if len(data) > settings.ai_vision_max_bytes:
+            limit_mb = settings.ai_vision_max_bytes // (1024 * 1024)
+            raise AIServiceError(f"图片不能超过 {limit_mb}MB")
+        # 注入测试替身时不要求全局配置；真实调用才需要视觉模型
+        if self._client is None and not settings.vision_configured:
+            raise AIServiceError("智能服务尚未配置")
+
+        return self._extract_event(
+            system=IMAGE_EXTRACT_SYSTEM_PROMPT,
+            user=(
+                "请从这张收付款截图里提取结构化信息。"
+                "只读取清晰可见的内容，看不清的字段留空并写进 warnings。现在输出 JSON。"
+            ),
+            raw_source_text="",
+            image=ImageInput(data=data, media_type=media_type),
+            temperature=VISION_TEMPERATURE,
+            # 图片没有可比对的文本，金额保留为候选值并要求用户核对
+            verify_amount_against_source=False,
+        )
+
+    # 向后兼容别名
+    def extract_cash_event(self, text: str) -> ExtractedEventResult:
+        return self.extract_cash_event_from_text(text)
 
     # ------------------------------------------------------------------
     def explain_analysis(self, payload: dict[str, Any]) -> dict[str, Any]:
