@@ -99,6 +99,26 @@ class AIServiceError(AppError):
     message = "智能服务暂时不可用，请手动完成当前操作"
 
 
+#: 面向用户的统一降级文案（所有 AI 失败原因对外都是这一句）
+AI_FALLBACK_MESSAGE = "智能服务暂时不可用，请手动完成当前操作"
+
+
+def register_ai_error_handler(app: FastAPI, *, message: str = AI_FALLBACK_MESSAGE) -> None:
+    """把 :class:`AIServiceError` 统一转换成 503 + 标准降级文案。
+
+    具体失败原因（超时 / 无 Key / HTTP 500 / 非法 JSON）只写日志，
+    不下发给前端，避免泄露内部细节。
+    """
+
+    @app.exception_handler(AIServiceError)
+    async def _ai_error(_: Request, exc: AIServiceError) -> JSONResponse:
+        logger.info("AI capability unavailable: %s", exc.message)
+        return _json(
+            {"code": AIServiceError.code, "message": message, "details": {}},
+            AIServiceError.status_code,
+        )
+
+
 def _json(payload: dict[str, Any], status_code: int) -> JSONResponse:
     return JSONResponse(status_code=status_code, content=payload)
 

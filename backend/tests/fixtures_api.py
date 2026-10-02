@@ -123,19 +123,35 @@ def engine_input(*, base: datetime | None = None, delayed: bool = False) -> Engi
     )
 
 
-def setup_merchant(client, *, opening: int = OPENING_BALANCE_CENTS, buffer: int = BUFFER_CENTS):
-    """注册商户、登记期初资金、写入三笔未来事项，返回 ``base`` 时间锚点。"""
+def setup_merchant(
+    client,
+    *,
+    opening: int = OPENING_BALANCE_CENTS,
+    buffer: int = BUFFER_CENTS,
+    username: str = "fixture_merchant",
+    write_events: bool = True,
+):
+    """注册商户、登记期初资金、写入三笔未来事项，返回 ``base`` 时间锚点。
+
+    若账户已存在（同一个测试内重复调用），直接登录并复用。
+    """
     response = client.post(
         "/api/v1/auth/register",
         json={
-            "username": "fixture_merchant",
+            "username": username,
             "password": "Wendai2025",
             "display_name": "固定算例商户",
             "roles": ["merchant"],
             "business_name": "固定算例商铺",
         },
     )
-    assert response.status_code == 201, response.text
+    if response.status_code == 409:
+        login = client.post(
+            "/api/v1/auth/login", json={"username": username, "password": "Wendai2025"}
+        )
+        assert login.status_code == 200, login.text
+    else:
+        assert response.status_code == 201, response.text
 
     base = anchor()
     snapshot = client.post(
@@ -152,6 +168,9 @@ def setup_merchant(client, *, opening: int = OPENING_BALANCE_CENTS, buffer: int 
         client.patch("/api/v1/merchant/profile", json={"default_buffer_amount_cents": buffer})
 
     event_ids: dict[str, str] = {}
+    if not write_events:
+        return base, event_ids
+
     for payload in event_payloads(base=base):
         created = client.post("/api/v1/cash-events", json=payload)
         assert created.status_code == 201, created.text

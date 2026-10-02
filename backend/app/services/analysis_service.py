@@ -289,6 +289,7 @@ class AnalysisService:
             "mode": payload.mode,
             "max_withdrawable_cents": max_withdrawable,
             "binding_label": binding_label,
+            "limiting_event_title": primary.limiting_event_title,
             "scenarios": [item.to_dict() for item in results],
         }
 

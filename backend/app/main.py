@@ -20,9 +20,10 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.router import api_router
+from app.api.v1.ai import AI_UNAVAILABLE_MESSAGE
 from app.core.config import settings
 from app.core.database import check_database
-from app.core.errors import register_exception_handlers
+from app.core.errors import register_ai_error_handler, register_exception_handlers
 from app.core.logging import configure_logging, get_logger
 from app.core.security import CSRF_HEADER, CSRF_HEADER_VALUE
 
@@ -117,6 +118,8 @@ def create_app() -> FastAPI:
         return response
 
     register_exception_handlers(app)
+    # 智能服务失败时的统一降级文案：核心功能永不受影响
+    register_ai_error_handler(app, message=AI_UNAVAILABLE_MESSAGE)
 
     app.include_router(api_router, prefix="/api/v1")
 
