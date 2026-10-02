@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 端到端验收（三）：家庭协同、经营咨询、响应式。
  */
 
@@ -90,7 +90,7 @@ test.describe('经营咨询', () => {
 
     await btn(page, '发起咨询').click();
     await page.getByLabel('选择要咨询的收付款事项').click();
-    await page.getByTitle(/商户结算款/).click();
+    await page.getByTitle(/结算款/).click();
     await page.getByLabel('问题类型').click();
     await page.getByTitle('到账/结算时间不明确').click();
     await page

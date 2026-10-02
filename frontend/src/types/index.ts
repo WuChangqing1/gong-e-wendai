@@ -5,7 +5,7 @@ export type Role = 'merchant' | 'family_member' | 'consultant' | 'admin';
 export type Direction = 'inflow' | 'outflow';
 export type CashEventState = 'scheduled' | 'included_in_opening' | 'cancelled';
 export type SourceType = 'manual' | 'csv_import' | 'ai_extract' | 'consultation_update';
-export type AnalysisStatus = 'OK' | 'PAYMENT_GAP' | 'BELOW_BUFFER' | 'INPUT_INCOMPLETE';
+export type AnalysisStatus = 'FEASIBLE' | 'PAYMENT_GAP' | 'BELOW_BUFFER' | 'INPUT_INCOMPLETE';
 export type AnalysisMode = 'current_plan' | 'delayed' | 'joint' | 'scenarios';
 
 export interface PageMeta {

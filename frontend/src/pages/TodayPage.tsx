@@ -1,6 +1,6 @@
 /** 今日决策页：最大可提用金额是页面视觉中心。 */
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import {
@@ -45,7 +45,7 @@ import ShareCardDrawer from '@/features/household/ShareCardDrawer';
 import type { AnalysisMode, AnalysisResult } from '@/types';
 import { formatCny, splitCny } from '@/utils/money';
 import { formatDateTime } from '@/utils/datetime';
-import { STATUS_TONE } from '@/utils/labels';
+import { FEASIBLE_ZERO_DETAIL, STATUS_TONE, decisionCopy } from '@/utils/labels';
 
 const MODE_OPTIONS: { label: string; value: AnalysisMode }[] = [
   { label: '按当前计划', value: 'current_plan' },
@@ -53,32 +53,46 @@ const MODE_OPTIONS: { label: string; value: AnalysisMode }[] = [
   { label: '共同约束', value: 'joint' },
 ];
 
-function HeroAmount({ result }: { result: AnalysisResult }) {
-  const parts = splitCny(result.max_withdrawable_cents);
-  const isZero = result.max_withdrawable_cents === 0;
-  const isGap = result.status === 'PAYMENT_GAP';
-  const modifier = isGap ? ' gew-hero__amount--gap' : isZero ? ' gew-hero__amount--zero' : '';
+interface HeroProps {
+  result: AnalysisResult;
+  onOpenReason: () => void;
+  onOpenShare: () => void;
+  onGoToEvents: () => void;
+}
 
-  const hint = useMemo(() => {
+function HeroAmount({ result, onOpenReason, onOpenShare, onGoToEvents }: HeroProps) {
+  const copy = decisionCopy(result.status);
+  const amountCents =
+    copy.amountKind === 'withdrawable'
+      ? result.max_withdrawable_cents
+      : copy.amountKind === 'payment_gap'
+        ? result.payment_gap_cents
+        : copy.amountKind === 'buffer_gap'
+          ? result.buffer_gap_cents
+          : null;
+
+  const parts = splitCny(amountCents ?? 0);
+  const isZero = amountCents === 0;
+  const modifier = copy.negative
+    ? ' gew-hero__amount--gap'
+    : isZero
+      ? ' gew-hero__amount--zero'
+      : '';
+
+  const detail = (() => {
     if (result.status === 'INPUT_INCOMPLETE') {
-      return '部分收付款事项的资料还不完整，暂时无法给出可提用金额。请先补充金额、时间或处理重复事项。';
+      return copy.detail;
     }
-    if (result.max_withdrawable_cents === null) {
-      return result.limiting_reason;
+    if (result.status === 'FEASIBLE') {
+      return result.max_withdrawable_cents === 0 ? FEASIBLE_ZERO_DETAIL : copy.detail;
     }
-    if (isGap) {
-      return `未来 7 天最紧张时点余额为 ${formatCny(result.limiting_balance_cents)}，已经出现付款缺口 ${formatCny(result.payment_gap_cents)}，当前不建议从经营资金中提用家庭资金。`;
-    }
-    if (isZero) {
-      return '当前不建议从经营资金中提用家庭资金。提用后未来 7 天的资金将无法同时满足已确认的经营付款与留底要求。';
-    }
-    return `当前安排下，提用该金额后仍能满足已确认经营付款和留底要求。`;
-  }, [result, isGap, isZero]);
+    return result.limiting_reason || copy.detail;
+  })();
 
   return (
     <section className="gew-hero">
       <div className="gew-hero__label">
-        <span>今日可提用</span>
+        <span>{copy.headline}</span>
         <StatusTag tone={STATUS_TONE[result.status] as 'ok' | 'warning' | 'danger' | 'info'}>
           {result.status_label}
         </StatusTag>
@@ -88,12 +102,25 @@ function HeroAmount({ result }: { result: AnalysisResult }) {
       </div>
 
       <div className={`gew-hero__amount${modifier}`} aria-live="polite">
-        <span className="gew-hero__symbol">{parts.symbol}</span>
-        <span className="gew-hero__integer">{parts.integer}</span>
-        <span className="gew-hero__fraction">.{parts.fraction}</span>
+        {amountCents === null ? (
+          <span className="gew-hero__integer">待确认</span>
+        ) : (
+          <>
+            <span className="gew-hero__symbol">{parts.symbol}</span>
+            <span className="gew-hero__integer">{parts.integer}</span>
+            <span className="gew-hero__fraction">.{parts.fraction}</span>
+          </>
+        )}
       </div>
 
-      <p className="gew-hero__hint">{hint}</p>
+      {copy.negative ? (
+        <p className="gew-hero__hint gew-hero__hint--strong">
+          <WarningOutlined aria-hidden="true" style={{ marginRight: 6 }} />
+          暂不建议提用家庭资金。
+        </p>
+      ) : null}
+
+      <p className="gew-hero__hint">{detail}</p>
 
       {result.mode === 'joint' && result.binding_label ? (
         <p className="gew-hero__hint" style={{ marginTop: 8 }}>
@@ -103,12 +130,15 @@ function HeroAmount({ result }: { result: AnalysisResult }) {
       ) : null}
 
       <div className="gew-hero__actions">
-        <Button type="primary" icon={<BulbOutlined />} href="#reason">
-          查看原因
+        <Button type="primary" icon={<BulbOutlined />} onClick={onOpenReason}>
+          查看为什么
         </Button>
-        <Button icon={<ShareAltOutlined />} href="#share">
+        <Button icon={<ShareAltOutlined />} onClick={onOpenShare}>
           分享给家庭
         </Button>
+        {result.status === 'INPUT_INCOMPLETE' ? (
+          <Button onClick={onGoToEvents}>去补充资料</Button>
+        ) : null}
       </div>
     </section>
   );
@@ -243,7 +273,12 @@ export default function TodayPage() {
         />
       ) : result ? (
         <>
-          <HeroAmount result={result} />
+          <HeroAmount
+            result={result}
+            onOpenReason={() => setReasonOpen(true)}
+            onOpenShare={() => setShareOpen(true)}
+            onGoToEvents={() => navigate('/events')}
+          />
 
           <Row gutter={[16, 16]}>
             <Col xs={12} lg={6}>

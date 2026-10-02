@@ -262,15 +262,7 @@ export default function FamilyPage() {
                         {
                           label: '风险状态',
                           value: (
-                            <StatusTag
-                              tone={
-                                analysisQuery.data.status === 'OK'
-                                  ? 'ok'
-                                  : analysisQuery.data.status === 'BELOW_BUFFER'
-                                    ? 'warning'
-                                    : 'danger'
-                              }
-                            >
+                            <StatusTag tone={STATUS_TONE[analysisQuery.data.status]}>
                               {analysisQuery.data.status_label}
                             </StatusTag>
                           ),

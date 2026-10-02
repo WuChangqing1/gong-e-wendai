@@ -69,7 +69,7 @@ test.describe('响应式与移动端', () => {
     const fixture = await createMerchantFixture(request, 'mobilecards');
     await loginViaUi(page, fixture.user.username);
 
-    await expect(page.locator('.gew-hero__label')).toContainText('今日可提用');
+    await expect(page.locator('.gew-hero__label')).toContainText('今日最多可提用');
 
     const boxes = await page.locator('.gew-card').evaluateAll((nodes) =>
       nodes.slice(0, 4).map((node) => {
@@ -145,7 +145,7 @@ test.describe('响应式与移动端', () => {
     await loginViaUi(page, fixture.user.username);
     await clickInBrowser(page.locator('.gew-tabbar'), '现金事件');
     await expect(page.getByRole('heading', { name: '现金事件' })).toBeVisible({ timeout: 25_000 });
-    await expect(page.getByRole('cell', { name: /商户结算款/ })).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByRole('cell', { name: /结算款/ })).toBeVisible({ timeout: 25_000 });
 
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,

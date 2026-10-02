@@ -33,7 +33,7 @@ import AnalysisChartsPanel from '@/features/analysis/AnalysisChartsPanel';
 import CashflowChart from '@/components/CashflowChart';
 import { InlineNote, MetricCard, PageHeader, SectionCard, StatusTag } from '@/components/ui';
 import ShareCardDrawer from '@/features/household/ShareCardDrawer';
-import type { AnalysisMode, AnalysisResult, CashEvent } from '@/types';
+import type { AnalysisMode, AnalysisResult, AnalysisStatus, CashEvent } from '@/types';
 import { formatCny, formatSigned } from '@/utils/money';
 import { formatDateTime } from '@/utils/datetime';
 import { STATUS_TONE } from '@/utils/labels';
@@ -44,6 +44,51 @@ const MODES: { label: string; value: AnalysisMode }[] = [
   { label: '共同约束', value: 'joint' },
   { label: '自定义情景', value: 'scenarios' },
 ];
+
+/**
+ * 共同约束顶部提示：按状态分支，而不是按「可提用金额是否为 0」决定文案。
+ *
+ * 0 金额在 PAYMENT_GAP / BELOW_BUFFER 下只表示「没有安全金额」，
+ * 不能写成「0 元满足所有情景」。
+ */
+const JOINT_ALERT_TONE: Record<AnalysisStatus, 'success' | 'warning' | 'error' | 'info'> = {
+  FEASIBLE: 'success',
+  PAYMENT_GAP: 'error',
+  BELOW_BUFFER: 'warning',
+  INPUT_INCOMPLETE: 'info',
+};
+
+function jointAlertMessage(result: AnalysisResult): string {
+  switch (result.status) {
+    case 'FEASIBLE':
+      return `共同检查后的今日可提用：${formatCny(result.max_withdrawable_cents)}`;
+    case 'PAYMENT_GAP':
+      return '共同检查发现付款缺口';
+    case 'BELOW_BUFFER':
+      return '共同检查发现留底不足';
+    default:
+      return '部分数据尚未确认，暂不能形成共同结果';
+  }
+}
+
+function jointAlertDescription(result: AnalysisResult): string {
+  switch (result.status) {
+    case 'FEASIBLE':
+      return result.binding_label
+        ? `按时到账与延迟到账都满足该金额，由最保守的「${result.binding_label}」决定。`
+        : '所有情景都满足该金额。';
+    case 'PAYMENT_GAP':
+      return `同时考虑这些情况后，至少一个情景即使不提用家庭资金，仍缺 ${formatCny(
+        result.payment_gap_cents,
+      )} 才能覆盖已确认付款。「可提用 0 元」只表示没有安全金额，并不代表资金安排已经可行。`;
+    case 'BELOW_BUFFER':
+      return `同时考虑这些情况后，至少一个情景会低于经营留底，距留底还差 ${formatCny(
+        result.buffer_gap_cents,
+      )}。`;
+    default:
+      return '部分情景的收付款金额、时间或状态尚未确认，补齐资料后即可得到共同结果。';
+  }
+}
 
 interface ScenarioForm {
   name: string;
@@ -233,20 +278,16 @@ export default function AnalysisPage() {
         <>
           {mode === 'joint' ? (
             <Alert
-              type="info"
+              type={JOINT_ALERT_TONE[result.status]}
               showIcon
-              message={`共同约束结果：${formatCny(result.max_withdrawable_cents)}`}
-              description={
-                result.binding_label
-                  ? `该金额同时满足所有情景，由最保守的「${result.binding_label}」决定。`
-                  : '所有情景都满足该金额。'
-              }
+              message={jointAlertMessage(result)}
+              description={jointAlertDescription(result)}
             />
           ) : null}
 
           <SectionCard
             title="资金曲线对比"
-            extra={<StatusTag tone={STATUS_TONE[result.status] as 'ok'}>{result.status_label}</StatusTag>}
+            extra={<StatusTag tone={STATUS_TONE[result.status]}>{result.status_label}</StatusTag>}
           >
             {curves.length === 0 ? (
               <Empty description="没有可展示的情景曲线" image={Empty.PRESENTED_IMAGE_SIMPLE} />
@@ -285,7 +326,7 @@ export default function AnalysisPage() {
                   dataIndex: 'statusLabel',
                   width: 130,
                   render: (value: string, row) => (
-                    <StatusTag tone={STATUS_TONE[row.status as 'OK'] as 'ok'}>{value}</StatusTag>
+                    <StatusTag tone={STATUS_TONE[row.status as AnalysisStatus]}>{value}</StatusTag>
                   ),
                 },
                 {
