@@ -1,0 +1,715 @@
+/* ============================================================
+   工 e 稳袋 — 设计令牌（Design Tokens）
+   视觉语言：大量白 / 浅灰，少量品牌红，黑灰文字，状态色只在必要处使用。
+   ============================================================ */
+
+:root {
+  /* 品牌红 */
+  --brand-red: #d90000;
+  --brand-red-hover: #b50000;
+  --brand-red-active: #990000;
+
+  --brand-red-soft: #fff1f1;
+  --brand-red-border: #f4caca;
+
+  /* 背景与容器 */
+  --page-bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-sunken: #fafbfc;
+
+  /* 文字 */
+  --text-primary: #1f1f1f;
+  --text-secondary: #666666;
+  --text-muted: #999999;
+  --text-inverse: #ffffff;
+
+  /* 描边 */
+  --border: #e8e8e8;
+  --border-strong: #d9d9d9;
+  --divider: #f0f0f0;
+
+  /* 状态色 */
+  --success: #178a4b;
+  --success-soft: #eef8f2;
+  --warning: #d97706;
+  --warning-soft: #fff8ec;
+  --danger: #c62828;
+  --danger-soft: #fdefef;
+  --info: #3568a8;
+  --info-soft: #eff4fa;
+
+  /* 圆角与阴影 */
+  --radius-sm: 4px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-raised: 0 2px 8px rgba(15, 23, 42, 0.06);
+
+  /* 间距 */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* 布局尺寸 */
+  --sider-width: 216px;
+  --sider-collapsed-width: 64px;
+  --header-height: 56px;
+  --mobile-tabbar-height: 56px;
+
+  /* 字体 */
+  --font-sans: 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Hiragino Sans GB', Arial,
+    sans-serif;
+  /* 金额使用等宽数字，保证纵向对齐 */
+  --font-numeric: 'SF Mono', 'JetBrains Mono', Consolas, 'PingFang SC', 'Microsoft YaHei',
+    monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--page-bg);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5715;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* 数字对齐 */
+.num,
+.tabular {
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+}
+
+a {
+  color: var(--brand-red);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--brand-red-hover);
+}
+
+/* ---------------- 布局 ---------------- */
+.gew-layout {
+  min-height: 100vh;
+  background: var(--page-bg);
+}
+
+.gew-sider {
+  background: var(--surface) !important;
+  border-right: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow: auto;
+}
+
+.gew-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: var(--header-height);
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--divider);
+  white-space: nowrap;
+}
+
+.gew-brand__mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: var(--brand-red);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 15px;
+  flex: 0 0 auto;
+}
+
+.gew-brand__text {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: var(--text-primary);
+}
+
+.gew-brand__sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.4px;
+}
+
+.gew-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  height: var(--header-height);
+  padding: 0 var(--space-5);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.gew-header__title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.gew-header__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.gew-content {
+  padding: var(--space-5);
+  max-width: 1440px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.gew-content--narrow {
+  max-width: 960px;
+}
+
+/* 移动端底部导航 */
+.gew-tabbar {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .gew-header {
+    padding: 0 var(--space-4);
+  }
+
+  .gew-content {
+    padding: var(--space-4) var(--space-3) calc(var(--mobile-tabbar-height) + 24px);
+  }
+
+  .gew-tabbar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    height: var(--mobile-tabbar-height);
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .gew-tabbar__item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+  }
+
+  .gew-tabbar__item--active {
+    color: var(--brand-red);
+  }
+
+  .gew-tabbar__icon {
+    font-size: 18px;
+    line-height: 1;
+  }
+}
+
+/* ---------------- 卡片 ---------------- */
+.gew-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+}
+
+.gew-card--flat {
+  box-shadow: none;
+}
+
+.gew-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--divider);
+}
+
+.gew-card__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.gew-card__body {
+  padding: var(--space-5);
+}
+
+.gew-card__body--tight {
+  padding: var(--space-4);
+}
+
+/* ---------------- 首页：可提用金额 ---------------- */
+.gew-hero {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6) var(--space-5);
+  box-shadow: var(--shadow-card);
+}
+
+.gew-hero__label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-3);
+}
+
+.gew-hero__amount {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+  color: var(--brand-red);
+  line-height: 1.05;
+}
+
+.gew-hero__symbol {
+  font-size: 28px;
+  font-weight: 500;
+}
+
+.gew-hero__integer {
+  font-size: 56px;
+  font-weight: 700;
+  letter-spacing: -1px;
+}
+
+.gew-hero__fraction {
+  font-size: 28px;
+  font-weight: 600;
+}
+
+.gew-hero__amount--zero {
+  color: var(--text-primary);
+}
+
+.gew-hero__amount--gap {
+  color: var(--danger);
+}
+
+.gew-hero__hint {
+  margin-top: var(--space-4);
+  font-size: 14px;
+  color: var(--text-secondary);
+  max-width: 720px;
+}
+
+.gew-hero__actions {
+  margin-top: var(--space-5);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+@media (max-width: 767px) {
+  .gew-hero {
+    padding: var(--space-5) var(--space-4);
+  }
+  .gew-hero__integer {
+    font-size: 42px;
+  }
+  .gew-hero__symbol,
+  .gew-hero__fraction {
+    font-size: 22px;
+  }
+}
+
+/* ---------------- 指标 ---------------- */
+.gew-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.gew-metric__label {
+  font-size: 13px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.gew-metric__value {
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.gew-metric__value--small {
+  font-size: 18px;
+}
+
+.gew-metric__value--inflow {
+  color: var(--success);
+}
+
+.gew-metric__value--outflow {
+  color: var(--text-primary);
+}
+
+.gew-metric__value--danger {
+  color: var(--danger);
+}
+
+.gew-metric__footnote {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ---------------- 状态标签 ---------------- */
+.gew-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  line-height: 18px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.gew-status--ok {
+  color: var(--success);
+  background: var(--success-soft);
+  border-color: #cfe9db;
+}
+
+.gew-status--warning {
+  color: var(--warning);
+  background: var(--warning-soft);
+  border-color: #f2ddb8;
+}
+
+.gew-status--danger {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: #f2cccc;
+}
+
+.gew-status--info {
+  color: var(--info);
+  background: var(--info-soft);
+  border-color: #d5e2f1;
+}
+
+.gew-status--neutral {
+  color: var(--text-secondary);
+  background: var(--surface-sunken);
+  border-color: var(--border);
+}
+
+/* ---------------- 列表 / 描述 ---------------- */
+.gew-desc-grid {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.gew-desc-item__label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
+.gew-desc-item__value {
+  font-size: 14px;
+  color: var(--text-primary);
+  word-break: break-all;
+}
+
+.gew-inline-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+  border: 1px solid var(--divider);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.gew-inline-note--warning {
+  background: var(--warning-soft);
+  border-color: #f2ddb8;
+  color: #8a5a08;
+}
+
+.gew-inline-note--danger {
+  background: var(--danger-soft);
+  border-color: #f2cccc;
+  color: #9c2020;
+}
+
+.gew-inline-note--info {
+  background: var(--info-soft);
+  border-color: #d5e2f1;
+  color: #2b547f;
+}
+
+/* ---------------- 认证页 ---------------- */
+.gew-auth {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  background: var(--surface);
+}
+
+.gew-auth__aside {
+  background: linear-gradient(160deg, #fff5f5 0%, #ffffff 55%, #f7f8fa 100%);
+  padding: 56px 48px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 24px;
+  border-right: 1px solid var(--border);
+}
+
+.gew-auth__aside h1 {
+  font-size: 30px;
+  line-height: 1.3;
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.gew-auth__aside p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 15px;
+  max-width: 460px;
+}
+
+.gew-auth__list {
+  display: grid;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.gew-auth__list-item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.gew-auth__form {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+}
+
+.gew-auth__form-inner {
+  width: 100%;
+  max-width: 380px;
+}
+
+@media (max-width: 900px) {
+  .gew-auth {
+    grid-template-columns: 1fr;
+  }
+  .gew-auth__aside {
+    display: none;
+  }
+  .gew-auth__form {
+    padding: 32px 20px;
+  }
+}
+
+/* ---------------- 图表 ---------------- */
+.gew-chart {
+  width: 100%;
+  height: 320px;
+}
+
+@media (max-width: 767px) {
+  .gew-chart {
+    height: 260px;
+  }
+}
+
+.gew-chart__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 0 var(--space-5) var(--space-4);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.gew-chart__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gew-chart__legend-swatch {
+  width: 14px;
+  height: 3px;
+  border-radius: 2px;
+  display: inline-block;
+}
+
+/* ---------------- 其他 ---------------- */
+.gew-page-title {
+  margin: 0 0 var(--space-2);
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.gew-page-subtitle {
+  margin: 0 0 var(--space-5);
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.gew-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.gew-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.gew-spacer {
+  flex: 1 1 auto;
+}
+
+.gew-empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.gew-kv-list {
+  display: grid;
+  gap: 8px;
+}
+
+.gew-kv-list__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 13px;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--divider);
+}
+
+.gew-kv-list__row:last-child {
+  border-bottom: none;
+}
+
+.gew-kv-list__key {
+  color: var(--text-secondary);
+}
+
+.gew-kv-list__value {
+  color: var(--text-primary);
+  font-weight: 500;
+  text-align: right;
+  word-break: break-all;
+}
+
+.gew-amount-inflow {
+  color: var(--success);
+}
+
+.gew-amount-outflow {
+  color: var(--text-primary);
+}
+
+.gew-mono {
+  font-family: var(--font-numeric);
+  font-variant-numeric: tabular-nums;
+}
+
+.gew-pre {
+  background: var(--surface-sunken);
+  border: 1px solid var(--divider);
+  border-radius: var(--radius);
+  padding: 12px;
+  font-family: var(--font-numeric);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+  max-height: 260px;
+  overflow: auto;
+}
+
+/* 无障碍：焦点可见 */
+:focus-visible {
+  outline: 2px solid var(--brand-red);
+  outline-offset: 1px;
+}
+
+/* 减少动效 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
