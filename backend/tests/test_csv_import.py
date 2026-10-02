@@ -255,9 +255,9 @@ class TestPaymentPlanImport:
 
 class TestImportPermissions:
     def test_upload_requires_merchant(self, client: TestClient):
-        from tests.conftest import login, register
+        from tests.conftest import login, provision_user, register
 
-        register(client, username="consult_x", roles=["consultant"])
+        provision_user(username="consult_x", roles=["consultant"])
         client.cookies.clear()
         login(client, username="consult_x")
         response = upload(client, VALID_CSV.encode("utf-8"))

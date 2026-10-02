@@ -544,9 +544,9 @@ class TestEnhancementApi:
         assert body["reserve_advice"]["current_reserve_cents"] == 600_00
 
     def test_overview_requires_merchant_role(self, client: TestClient):
-        from tests.conftest import login, register
+        from tests.conftest import login, provision_user, register
 
-        register(client, username="consult_enh", roles=["consultant"])
+        provision_user(username="consult_enh", roles=["consultant"])
         client.cookies.clear()
         login(client, username="consult_enh")
         assert client.get("/api/v1/enhancements/overview").status_code == 403

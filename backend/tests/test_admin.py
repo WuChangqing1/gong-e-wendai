@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.security import hash_password
-from tests.conftest import DEFAULT_PASSWORD, login, register
+from tests.conftest import DEFAULT_PASSWORD, login, provision_user, register
 from tests import fixtures_api as api_fx
 
 
@@ -136,7 +136,7 @@ class TestAdminPermissions:
         assert merchant_client.get("/api/v1/admin/audit-logs").status_code == 403
 
     def test_consultant_cannot_access_admin(self, client: TestClient):
-        register(client, username="con_admin", roles=["consultant"])
+        provision_user(username="con_admin", roles=["consultant"])
         client.cookies.clear()
         login(client, username="con_admin")
         assert client.get("/api/v1/admin/overview").status_code == 403

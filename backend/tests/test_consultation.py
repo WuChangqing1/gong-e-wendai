@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests import fixtures_api as api_fx
-from tests.conftest import login, register
+from tests.conftest import login, provision_user, register
 
 
 @pytest.fixture
@@ -21,7 +21,7 @@ def merchant_with_event(merchant_client: TestClient):
 def consultant_client(app):
     with TestClient(app) as client:
         client.headers.update({"X-Requested-With": "XMLHttpRequest"})
-        register(client, username="consultant_a", display_name="咨询小李", roles=["consultant"])
+        provision_user(username="consultant_a", display_name="咨询小李", roles=["consultant"])
         login(client, username="consultant_a")
         yield client
 

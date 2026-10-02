@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests import fixtures_api as api_fx
+from tests.conftest import provision_user
 
 BASE_PAYLOAD = {
     "title": "门店租金",
@@ -291,7 +292,7 @@ class TestOwnershipIsolation:
         assert listing["meta"]["total"] == 0
 
     def test_family_member_cannot_access_events(self, client: TestClient):
-        from tests.conftest import login, register
+        from tests.conftest import login, provision_user, register
 
         register(client, username="fam_only", roles=["family_member"])
         client.cookies.clear()
@@ -301,7 +302,7 @@ class TestOwnershipIsolation:
     def test_consultant_cannot_access_events(self, client: TestClient):
         from tests.conftest import login, register
 
-        register(client, username="con_only", roles=["consultant"])
+        provision_user(username="con_only", roles=["consultant"])
         client.cookies.clear()
         login(client, username="con_only")
         assert client.get("/api/v1/cash-events").status_code == 403

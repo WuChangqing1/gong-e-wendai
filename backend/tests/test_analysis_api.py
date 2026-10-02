@@ -423,9 +423,9 @@ class TestScenarios:
 
 class TestAnalysisPermissions:
     def test_analysis_requires_merchant_role(self, client: TestClient):
-        from tests.conftest import login, register
+        from tests.conftest import login, provision_user, register
 
-        register(client, username="consult_only", roles=["consultant"])
+        provision_user(username="consult_only", roles=["consultant"])
         client.clear_cookies = None  # type: ignore[attr-defined]
         client.cookies.clear()
         login(client, username="consult_only")

@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.security import CSRF_HEADER, CSRF_HEADER_VALUE
-from tests.conftest import DEFAULT_PASSWORD, login, register
+from tests.conftest import DEFAULT_PASSWORD, login, provision_user, register
 
 
 class TestRegister:
@@ -170,7 +170,7 @@ class TestOwnership:
         assert theirs["business_name"] == "乙商户"
 
     def test_consultant_cannot_read_merchant_profile(self, client: TestClient):
-        register(client, username="consult_only", roles=["consultant"])
+        provision_user(username="consult_only", roles=["consultant"])
         client.cookies.clear()
         login(client, username="consult_only")
         response = client.get("/api/v1/merchant/profile")
