@@ -40,6 +40,7 @@ import {
   StatusTag,
 } from '@/components/ui';
 import AiExplainPanel from '@/features/ai/AiExplainPanel';
+import AnalysisChartsPanel from '@/features/analysis/AnalysisChartsPanel';
 import ShareCardDrawer from '@/features/household/ShareCardDrawer';
 import type { AnalysisMode, AnalysisResult } from '@/types';
 import { formatCny, splitCny } from '@/utils/money';
@@ -300,48 +301,47 @@ export default function TodayPage() {
             <CashflowChart scenarios={scenarios} bufferCents={result.buffer_cents} />
           </SectionCard>
 
-          <Row gutter={[16, 16]}>
-            <Col xs={24} lg={14}>
-              <SectionCard
-                title="最紧张资金时点"
-                extra={<StatusTag tone="warning">限制今日可提用金额</StatusTag>}
-              >
-                <DescriptionGrid
-                  items={[
-                    {
-                      label: '时间',
-                      value: result.limiting_timestamp ? formatDateTime(result.limiting_timestamp) : '--',
-                    },
-                    {
-                      label: '该时点余额',
-                      value: (
-                        <span className="num">{formatCny(result.limiting_balance_cents)}</span>
-                      ),
-                    },
-                    {
-                      label: '影响最大的事项',
-                      value: result.limiting_event_title ?? '期初余额',
-                    },
-                    {
-                      label: '经营留底',
-                      value: <span className="num">{formatCny(result.buffer_cents)}</span>,
-                    },
-                  ]}
-                />
-                <div style={{ marginTop: 16 }}>
-                  <InlineNote tone={result.status === 'OK' ? 'info' : 'warning'}>
-                    {result.limiting_reason}
-                  </InlineNote>
-                </div>
-                <div style={{ marginTop: 16 }}>
-                  <Button id="reason" onClick={() => setReasonOpen(true)}>
-                    查看计算依据
-                  </Button>
-                </div>
-              </SectionCard>
-            </Col>
+          {/* 图表化分析：每日收支与待结算到账分布 */}
+          <AnalysisChartsPanel analysis={result} compact />
 
-            <Col xs={24} lg={10}>
+          <SectionCard
+            title="最紧张资金时点"
+            extra={<StatusTag tone="warning">限制今日可提用金额</StatusTag>}
+          >
+            <DescriptionGrid
+              items={[
+                {
+                  label: '时间',
+                  value: result.limiting_timestamp ? formatDateTime(result.limiting_timestamp) : '--',
+                },
+                {
+                  label: '该时点余额',
+                  value: <span className="num">{formatCny(result.limiting_balance_cents)}</span>,
+                },
+                {
+                  label: '影响最大的事项',
+                  value: result.limiting_event_title ?? '期初余额',
+                },
+                {
+                  label: '经营留底',
+                  value: <span className="num">{formatCny(result.buffer_cents)}</span>,
+                },
+              ]}
+            />
+            <div style={{ marginTop: 12 }}>
+              <Space wrap>
+                <Button id="reason" onClick={() => setReasonOpen(true)}>
+                  查看计算依据
+                </Button>
+                <Button type="link" onClick={() => navigate('/analysis')}>
+                  查看完整情景分析
+                </Button>
+              </Space>
+            </div>
+          </SectionCard>
+
+          <Row gutter={[16, 16]}>
+            <Col xs={24} lg={12}>
               <SectionCard title="缺口情况">
                 <Row gutter={16}>
                   <Col span={12}>
@@ -361,25 +361,22 @@ export default function TodayPage() {
                     />
                   </Col>
                 </Row>
-                <div style={{ marginTop: 16 }}>
+                <div style={{ marginTop: 12 }}>
                   <InlineNote tone="neutral">
                     两个缺口分别计算，不能相加：留底缺口已经包含了付款缺口。
                   </InlineNote>
                 </div>
               </SectionCard>
             </Col>
-          </Row>
-
-          <Row gutter={[16, 16]}>
-            <Col xs={24} lg={14}>
+            <Col xs={24} lg={12}>
               <div id="share">
                 <SectionCard title="家庭协同">
-                  <p style={{ color: 'var(--text-secondary)', marginTop: 0 }}>
-                    经营资金与家庭资金高度关联，但共同决策者不一定在现场。
-                    你可以把关键结论分享给家庭成员，由对方确认或提出需要商量的事项。
-                  </p>
                   <Space wrap>
-                    <Button type="primary" icon={<ShareAltOutlined />} onClick={() => setShareOpen(true)}>
+                    <Button
+                      type="primary"
+                      icon={<ShareAltOutlined />}
+                      onClick={() => setShareOpen(true)}
+                    >
                       分享给家庭
                     </Button>
                     <Button onClick={() => navigate('/family')}>进入家庭协同</Button>
@@ -393,10 +390,9 @@ export default function TodayPage() {
                 </SectionCard>
               </div>
             </Col>
-            <Col xs={24} lg={10}>
-              <AiExplainPanel result={result} />
-            </Col>
           </Row>
+
+          <AiExplainPanel result={result} />
         </>
       ) : null}
 

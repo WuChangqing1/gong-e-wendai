@@ -326,6 +326,126 @@ class TestAnalysisPermissions:
         assert client.get("/api/v1/analysis/today").status_code == 401
 
 
+class TestWindowSummary:
+    """窗口聚合（图表数据源）：与引擎口径必须一致。"""
+
+    def test_totals_match_engine(self, fixture_merchant):
+        client, _, _ = fixture_merchant
+        summary = client.get("/api/v1/analysis/window-summary").json()
+        analysis = client.get("/api/v1/analysis/today").json()
+
+        assert summary["window_days"] == 7
+        assert summary["opening_balance_cents"] == analysis["opening_balance_cents"]
+        assert summary["scheduled_inflow_cents"] == analysis["window_inflow_cents"]
+        assert summary["scheduled_outflow_cents"] == analysis["window_outflow_cents"]
+        assert summary["buffer_cents"] == analysis["buffer_cents"]
+        assert (
+            summary["scheduled_inflow_cents"] - summary["scheduled_outflow_cents"]
+            == summary["net_change_cents"]
+        )
+        # 期末余额 = 期初 + 净变化
+        assert (
+            summary["closing_balance_cents"]
+            == summary["opening_balance_cents"] + summary["net_change_cents"]
+        )
+
+    def test_daily_terms_consistent(self, fixture_merchant):
+        client, _, _ = fixture_merchant
+        summary = client.get("/api/v1/analysis/window-summary").json()
+        days = [item["day"] for item in summary["daily_terms"]]
+        assert days == sorted(days)
+        # 7 天窗口 + 期初当天
+        assert len(summary["daily_terms"]) == 8
+
+        for item in summary["daily_terms"]:
+            assert item["net_cents"] == item["inflow_cents"] - item["outflow_cents"]
+
+        assert (
+            sum(item["inflow_cents"] for item in summary["daily_terms"])
+            == summary["scheduled_inflow_cents"]
+        )
+        assert (
+            sum(item["outflow_cents"] for item in summary["daily_terms"])
+            == summary["scheduled_outflow_cents"]
+        )
+
+    def test_closing_balance_is_running_total(self, fixture_merchant):
+        client, _, _ = fixture_merchant
+        summary = client.get("/api/v1/analysis/window-summary").json()
+        running = summary["opening_balance_cents"]
+        for item in summary["daily_terms"]:
+            running += item["net_cents"]
+            assert item["closing_balance_cents"] == running
+
+    def test_category_terms_share_ratio(self, fixture_merchant):
+        client, _, _ = fixture_merchant
+        categories = client.get("/api/v1/analysis/window-summary").json()["category_terms"]
+        assert categories
+
+        inflow = [item for item in categories if item["direction"] == "inflow"]
+        outflow = [item for item in categories if item["direction"] == "outflow"]
+        assert (
+            sum(item["amount_cents"] for item in inflow)
+            == client.get("/api/v1/analysis/window-summary").json()["scheduled_inflow_cents"]
+        )
+        for item in outflow:
+            assert item["label"]
+        assert sum(item["share_ratio"] for item in outflow) == pytest.approx(1.0)
+
+    def test_arrival_terms_only_inflows(self, fixture_merchant):
+        client, _, _ = fixture_merchant
+        summary = client.get("/api/v1/analysis/window-summary").json()
+        arrivals = summary["arrival_terms"]
+        assert arrivals
+        assert (
+            sum(item["amount_cents"] for item in arrivals) == summary["scheduled_inflow_cents"]
+        )
+        days = [item["day"] for item in arrivals]
+        assert days == sorted(days)
+        for item in arrivals:
+            assert item["event_count"] >= 1
+            assert item["titles"]
+
+    def test_cancelled_event_is_excluded(self, fixture_merchant):
+        client, _, event_ids = fixture_merchant
+        before = client.get("/api/v1/analysis/window-summary").json()
+        client.post(f"/api/v1/cash-events/{event_ids['API-SETTLE-0001']}/cancel")
+        after = client.get("/api/v1/analysis/window-summary").json()
+        assert after["scheduled_inflow_cents"] == before["scheduled_inflow_cents"] - 2200_00
+        assert after["event_count"] == before["event_count"] - 1
+
+    def test_empty_merchant_returns_zeroes(self, second_merchant_client):
+        body = second_merchant_client.get("/api/v1/analysis/window-summary").json()
+        assert body["event_count"] == 0
+        assert body["opening_balance_cents"] == 0
+        assert body["scheduled_inflow_cents"] == 0
+        assert len(body["daily_terms"]) == 8
+
+    def test_requires_merchant_role(self, client: TestClient):
+        client.cookies.clear()
+        assert client.get("/api/v1/analysis/window-summary").status_code == 401
+
+    def test_response_shape(self, fixture_merchant):
+        client, _, _ = fixture_merchant
+        body = client.get("/api/v1/analysis/window-summary").json()
+        for key in (
+            "window_start",
+            "window_end",
+            "window_days",
+            "opening_balance_cents",
+            "closing_balance_cents",
+            "buffer_cents",
+            "scheduled_inflow_cents",
+            "scheduled_outflow_cents",
+            "net_change_cents",
+            "daily_terms",
+            "category_terms",
+            "arrival_terms",
+            "event_count",
+        ):
+            assert key in body, key
+
+
 class TestOverviewConsistency:
     def test_overview_matches_analysis(self, fixture_merchant):
         client, _, _ = fixture_merchant

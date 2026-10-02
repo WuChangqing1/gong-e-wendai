@@ -13,6 +13,7 @@ import type {
   RevisionWithEvent,
   Scenario,
   StaleStatus,
+  WindowSummary,
 } from '@/types';
 
 export interface CashEventPayload {
@@ -70,6 +71,9 @@ export const analysisApi = {
   run: (payload: AnalysisRunPayload) => post<AnalysisResult>('/analysis/run', payload),
   stale: () => get<StaleStatus>('/analysis/stale'),
   history: (limit = 20) => get<Record<string, unknown>[]>('/analysis/history', { params: { limit } }),
+  /** 未来 7 天窗口聚合，供各图表使用 */
+  windowSummary: (params: { buffer_cents?: number; reference_at?: string } = {}) =>
+    get<WindowSummary>('/analysis/window-summary', { params }),
 };
 
 export const scenarioApi = {

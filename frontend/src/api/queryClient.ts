@@ -31,6 +31,8 @@ export const queryKeys = {
   todayAnalysis: ['analysis', 'today'] as const,
   analysisStale: ['analysis', 'stale'] as const,
   analysisHistory: ['analysis', 'history'] as const,
+  windowSummary: (params: Record<string, unknown> = {}) =>
+    ['analysis', 'window-summary', params] as const,
   cashEvents: (params: Record<string, unknown>) => ['cash-events', params] as const,
   cashEventStats: ['cash-events', 'stats'] as const,
   cashEventDetail: (id: string) => ['cash-events', 'detail', id] as const,

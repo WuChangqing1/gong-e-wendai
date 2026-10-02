@@ -22,6 +22,13 @@ export default function AppLayout() {
   const clear = useAuthStore((state) => state.clear);
   const collapsed = useUiStore((state) => state.sidebarCollapsed);
   const toggleSidebar = useUiStore((state) => state.toggleSidebar);
+  const isMobile = useUiStore((state) => state.isMobile);
+  const setIsMobile = useUiStore((state) => state.setIsMobile);
+
+  // 窄屏下一律收起左侧导航（导航改由底部导航承担）。
+  // 只声明 Sider 的 breakpoint 而不接管 collapsed，窄屏时左侧仍会占用 216px，
+  // 把内容区压到 150px 左右，图表与表格都会挤成一列。
+  const siderCollapsed = collapsed || isMobile;
 
   const navItems = useMemo(() => navForRoles(user?.roles ?? []), [user?.roles]);
   const role = primaryRole(user);
@@ -58,12 +65,13 @@ export default function AppLayout() {
         className="gew-sider"
         width={216}
         collapsedWidth={64}
-        collapsed={collapsed}
+        collapsed={siderCollapsed}
         breakpoint="lg"
         trigger={null}
         theme="light"
+        onBreakpoint={(broken) => setIsMobile(broken)}
       >
-        <BrandMark collapsed={collapsed} />
+        <BrandMark collapsed={siderCollapsed} />
         <Menu
           mode="inline"
           selectedKeys={[selectedKey]}
@@ -75,12 +83,14 @@ export default function AppLayout() {
       <Layout>
         <Header className="gew-header">
           <div className="gew-row" style={{ gap: 12 }}>
-            <Button
-              type="text"
-              aria-label={collapsed ? '展开导航' : '收起导航'}
-              icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-              onClick={toggleSidebar}
-            />
+            {!isMobile ? (
+              <Button
+                type="text"
+                aria-label={collapsed ? '展开导航' : '收起导航'}
+                icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+                onClick={toggleSidebar}
+              />
+            ) : null}
             <span className="gew-header__title">{activeItem?.label ?? '工 e 稳袋'}</span>
           </div>
 

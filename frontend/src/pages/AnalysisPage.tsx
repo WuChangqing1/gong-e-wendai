@@ -6,6 +6,7 @@ import {
   Alert,
   App as AntdApp,
   Button,
+  Collapse,
   Col,
   DatePicker,
   Empty,
@@ -28,6 +29,7 @@ import dayjs, { type Dayjs } from 'dayjs';
 import { analysisApi, cashEventApi, scenarioApi } from '@/api/cashflow';
 import { errorMessage } from '@/api/client';
 import { queryKeys } from '@/api/queryClient';
+import AnalysisChartsPanel from '@/features/analysis/AnalysisChartsPanel';
 import CashflowChart from '@/components/CashflowChart';
 import { InlineNote, MetricCard, PageHeader, SectionCard, StatusTag } from '@/components/ui';
 import ShareCardDrawer from '@/features/household/ShareCardDrawer';
@@ -253,6 +255,9 @@ export default function AnalysisPage() {
             )}
           </SectionCard>
 
+          {/* 图表化分析：每日收支、收支结构、余额变化过程、资金积累节奏、到账分布、情景对比 */}
+          <AnalysisChartsPanel analysis={result} />
+
           <SectionCard title="情景对比明细">
             <Table
               rowKey="key"
@@ -440,13 +445,28 @@ export default function AnalysisPage() {
         </SectionCard>
       ) : null}
 
-      <SectionCard title="情景如何影响结论">
-        <InlineNote tone="info">
-          情景不会修改你的收付款事项。系统在计算时临时代入情景中的时间或金额调整，
-          每次都会重新推演未来 7 天的余额曲线。
-          共同约束模式下，你会看到一个同时满足所有情景的可提用上限——它等于各情景上限中最小的那个。
-        </InlineNote>
-      </SectionCard>
+      <Collapse
+        size="small"
+        items={[
+          {
+            key: 'notes',
+            label: '说明与口径（点击展开）',
+            children: (
+              <div className="gew-stack">
+                <InlineNote tone="info">
+                  情景不会修改你的收付款事项。系统在计算时临时代入情景中的时间或金额调整，
+                  每次都会重新推演未来 7 天的余额曲线。共同约束模式下，你会看到一个同时满足
+                  所有情景的可提用上限——它等于各情景上限中最小的那个。
+                </InlineNote>
+                <InlineNote tone="neutral">
+                  所有金额、时间与结论都由确定性计算引擎给出；页面上的图表只是把同一份计算结果
+                  换成图形表达，不引入任何新的计算口径。
+                </InlineNote>
+              </div>
+            ),
+          },
+        ]}
+      />
 
       <Modal
         title="新建情景"

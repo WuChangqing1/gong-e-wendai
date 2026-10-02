@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
@@ -26,8 +26,12 @@ from app.models.merchant import MerchantProfile
 from app.schemas.analysis import (
     AnalysisResultOut,
     AnalysisRunRequest,
+    ArrivalTerm,
+    CategoryTerm,
+    DailyTerm,
     ScenarioCurve,
     ScenarioOut,
+    WindowSummary,
 )
 from app.services.cash_engine import (
     ENGINE_VERSION,
@@ -40,13 +44,30 @@ from app.services.cash_engine import (
     run_engine,
     run_joint,
 )
-from app.utils.timeutil import WINDOW_DAYS, to_utc, utcnow
+from app.utils.timeutil import APP_TIMEZONE, WINDOW_DAYS, to_utc, utcnow
 
 MODE_CURRENT_PLAN = "current_plan"
 MODE_DELAYED = "delayed"
 MODE_JOINT = "joint"
 
 STALE_REASON_DEFAULT = "收付款事项或资金时点已变更"
+
+#: 事项类型中文标签（与前端 labels 保持一致，后端也需要用于图表分组）
+EVENT_TYPE_LABELS = {
+    "settlement": "结算款",
+    "sale_receipt": "销售收款",
+    "supplier_payment": "供应商付款",
+    "rent": "房租",
+    "payroll": "工资",
+    "utility": "水电",
+    "tax": "税费",
+    "loan_repayment": "还款",
+    "platform_fee": "平台费用",
+    "transfer_in": "转入",
+    "transfer_out": "转出",
+    "other_inflow": "其他收入",
+    "other_outflow": "其他支出",
+}
 
 
 def _scenario_kind_label(kind: str) -> str:
@@ -342,6 +363,149 @@ class AnalysisService:
 
     def _version_hash(self, merchant_id: str) -> str:
         return events_version_hash([self.to_input(event) for event in self.load_events(merchant_id)])
+
+    # ------------------------------------------------------------------
+    def window_summary(
+        self,
+        profile: MerchantProfile,
+        *,
+        snapshot_at: datetime | None = None,
+        buffer_cents: int | None = None,
+    ) -> WindowSummary:
+        """聚合未来 7 天窗口内的分析数据（供图表使用）。
+
+        聚合口径与引擎完全一致：只统计 ``state = scheduled`` 且落在窗口内的
+        事项，方向决定符号，逐日以当地时区（Asia/Shanghai）归日。
+        """
+        reference = self._reference_time(profile, snapshot_at)
+        window_end = reference + timedelta(days=WINDOW_DAYS)
+        opening = self._opening_balance(profile)
+        buffer = (
+            int(buffer_cents)
+            if buffer_cents is not None
+            else int(profile.default_buffer_amount_cents)
+        )
+
+        events = [
+            event
+            for event in self.load_events(profile.id)
+            if event.state == "scheduled"
+            and reference <= to_utc(event.scheduled_at) <= window_end
+        ]
+
+        # 逐日聚合：以当地时间为准归日，保证与经营者看到的日期一致
+        days: dict[date, dict[str, int]] = {}
+        cursor = reference.astimezone(APP_TIMEZONE).date()
+        last_day = window_end.astimezone(APP_TIMEZONE).date()
+        while cursor <= last_day:
+            days[cursor] = {
+                "inflow_cents": 0,
+                "outflow_cents": 0,
+                "net_cents": 0,
+                "closing_balance_cents": 0,
+                "event_count": 0,
+            }
+            cursor += timedelta(days=1)
+
+        category_acc: dict[tuple[str, str], dict[str, int]] = {}
+        arrival_acc: dict[date, dict[str, object]] = {}
+
+        for event in events:
+            when = to_utc(event.scheduled_at)
+            local_day = when.astimezone(APP_TIMEZONE).date()
+            bucket = days.setdefault(
+                local_day,
+                {
+                    "inflow_cents": 0,
+                    "outflow_cents": 0,
+                    "net_cents": 0,
+                    "closing_balance_cents": 0,
+                    "event_count": 0,
+                },
+            )
+            amount = int(event.amount_cents)
+            if event.direction == "inflow":
+                bucket["inflow_cents"] += amount
+                bucket["net_cents"] += amount
+                arrival = arrival_acc.setdefault(local_day, {"amount_cents": 0, "titles": []})
+                arrival["amount_cents"] = int(arrival["amount_cents"]) + amount
+                titles = arrival["titles"]
+                if isinstance(titles, list) and len(titles) < 5:
+                    titles.append(event.title)
+            else:
+                bucket["outflow_cents"] += amount
+                bucket["net_cents"] -= amount
+            bucket["event_count"] += 1
+
+            key = (event.event_type, event.direction)
+            acc = category_acc.setdefault(key, {"amount_cents": 0, "event_count": 0})
+            acc["amount_cents"] += amount
+            acc["event_count"] += 1
+
+        # 期初之后的每日期末余额
+        running = opening
+        daily_terms: list[DailyTerm] = []
+        for day, bucket in sorted(days.items()):
+            running += bucket["net_cents"]
+            daily_terms.append(
+                DailyTerm(
+                    day=day,
+                    inflow_cents=bucket["inflow_cents"],
+                    outflow_cents=bucket["outflow_cents"],
+                    net_cents=bucket["net_cents"],
+                    closing_balance_cents=running,
+                    event_count=bucket["event_count"],
+                )
+            )
+
+        inflow_total = sum(item.inflow_cents for item in daily_terms)
+        outflow_total = sum(item.outflow_cents for item in daily_terms)
+
+        category_terms = [
+            CategoryTerm(
+                event_type=event_type,
+                label=EVENT_TYPE_LABELS.get(event_type, event_type),
+                direction=direction,
+                amount_cents=values["amount_cents"],
+                event_count=values["event_count"],
+                share_ratio=round(
+                    values["amount_cents"]
+                    / (inflow_total if direction == "inflow" else outflow_total)
+                    if (inflow_total if direction == "inflow" else outflow_total)
+                    else 0.0,
+                    4,
+                ),
+            )
+            for (event_type, direction), values in sorted(
+                category_acc.items(), key=lambda item: -item[1]["amount_cents"]
+            )
+        ]
+
+        arrival_terms = [
+            ArrivalTerm(
+                day=day,
+                amount_cents=int(values["amount_cents"]),
+                event_count=len(values["titles"]) if isinstance(values["titles"], list) else 0,
+                titles=list(values["titles"]) if isinstance(values["titles"], list) else [],
+            )
+            for day, values in sorted(arrival_acc.items())
+        ]
+
+        return WindowSummary(
+            window_start=reference,
+            window_end=window_end,
+            window_days=WINDOW_DAYS,
+            opening_balance_cents=opening,
+            closing_balance_cents=running,
+            buffer_cents=buffer,
+            scheduled_inflow_cents=inflow_total,
+            scheduled_outflow_cents=outflow_total,
+            net_change_cents=inflow_total - outflow_total,
+            daily_terms=daily_terms,
+            category_terms=category_terms,
+            arrival_terms=arrival_terms,
+            event_count=len(events),
+        )
 
     # ------------------------------------------------------------------
     def mark_stale(

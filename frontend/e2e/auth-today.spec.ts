@@ -71,7 +71,10 @@ test.describe('今日决策', () => {
     await expect(hero).toContainText('00');
 
     await expect(page.getByText('当前可用')).toBeVisible();
-    await expect(page.getByText('待结算资金')).toBeVisible();
+    // 待结算资金卡片：文案可能同时出现在提示气泡与说明段落里，这里限定在资金卡片内
+    await expect(
+      page.locator('.gew-metric').filter({ hasText: '待结算资金' }).first(),
+    ).toBeVisible();
     await expect(page.getByText('未来 7 天收入')).toBeVisible();
     await expect(page.getByText('未来 7 天支出')).toBeVisible();
     await expect(page.getByText('当前不可作为可用经营资金')).toBeVisible();
@@ -104,7 +107,13 @@ test.describe('今日决策', () => {
     await loginViaUi(page, fixture.user.username);
     await gotoAuthed(page, '/today');
 
-    await expect(page.locator('.gew-chart canvas')).toBeVisible({ timeout: 25_000 });
+    // 图表区容器先出现，ECharts 初始化后再出现 canvas
+    await expect(page.locator('.gew-chart').first()).toBeVisible({ timeout: 25_000 });
+    await page.waitForFunction(
+      () => document.querySelectorAll('.gew-chart canvas').length > 0,
+      undefined,
+      { timeout: 25_000 },
+    );
     await expect(page.getByText('0 元线（付款缺口）')).toBeVisible();
     await expect(page.getByText(/经营留底 ¥600\.00/)).toBeVisible();
     await expect(page.getByText(/可提用 ¥1,200\.00/)).toBeVisible();

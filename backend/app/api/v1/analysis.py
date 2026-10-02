@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
-from app.api.deps import client_ip, get_merchant_profile
+from app.api.deps import client_ip, get_current_user, get_merchant_profile
 from app.core.database import get_db
 from app.models.merchant import MerchantProfile
 from app.models.user import User
@@ -19,12 +19,34 @@ from app.schemas.analysis import (
     ScenarioOut,
     ScenarioUpdate,
     StaleStatus,
+    WindowSummary,
 )
 from app.schemas.cash_event import CancelRequest
 from app.services.analysis_service import AnalysisService
-from app.api.deps import get_current_user
 
 router = APIRouter(tags=["资金分析"])
+
+
+@router.get(
+    "/analysis/window-summary",
+    response_model=WindowSummary,
+    summary="未来 7 天窗口聚合（供图表使用）",
+)
+def window_summary(
+    buffer_cents: int | None = Query(default=None, ge=0),
+    reference_at: datetime | None = Query(
+        default=None, description="指定期初时点，默认取最近一次资金时点"
+    ),
+    profile: MerchantProfile = Depends(get_merchant_profile),
+    db: Session = Depends(get_db),
+) -> WindowSummary:
+    """按日聚合收付款、按事项类型聚合收支结构、给出待结算到账时间分布。
+
+    全部由确定性引擎的事件扫描结果聚合，不重新定义任何金额规则。
+    """
+    return AnalysisService(db).window_summary(
+        profile, snapshot_at=reference_at, buffer_cents=buffer_cents
+    )
 
 
 @router.post("/analysis/run", response_model=AnalysisResultOut, summary="运行资金分析")

@@ -285,6 +285,48 @@ export interface StaleStatus {
   max_withdrawable_cents: number | null;
 }
 
+/** 未来 7 天窗口聚合（图表数据源）。 */
+export interface DailyTerm {
+  day: string;
+  inflow_cents: number;
+  outflow_cents: number;
+  net_cents: number;
+  closing_balance_cents: number;
+  event_count: number;
+}
+
+export interface CategoryTerm {
+  event_type: string;
+  label: string;
+  direction: Direction;
+  amount_cents: number;
+  event_count: number;
+  share_ratio: number;
+}
+
+export interface ArrivalTerm {
+  day: string;
+  amount_cents: number;
+  event_count: number;
+  titles: string[];
+}
+
+export interface WindowSummary {
+  window_start: string;
+  window_end: string;
+  window_days: number;
+  opening_balance_cents: number;
+  closing_balance_cents: number;
+  buffer_cents: number;
+  scheduled_inflow_cents: number;
+  scheduled_outflow_cents: number;
+  net_change_cents: number;
+  daily_terms: DailyTerm[];
+  category_terms: CategoryTerm[];
+  arrival_terms: ArrivalTerm[];
+  event_count: number;
+}
+
 export interface HealthStatus {
   status: string;
   database: string;

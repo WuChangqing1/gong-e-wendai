@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -135,3 +135,58 @@ class StaleStatus(BaseModel):
     last_generated_at: datetime | None = None
     stale_reason: str | None = None
     max_withdrawable_cents: int | None = None
+
+
+# ---------------------------------------------------------------------------
+# 窗口分析聚合（供图表使用）
+#
+# 全部由确定性引擎的事件扫描结果聚合得出，不重新定义任何金额规则：
+# * 每日收支合计与当日期末余额
+# * 按事项类型的收支结构
+# * 待结算资金的到账时间分布
+# ---------------------------------------------------------------------------
+class DailyTerm(BaseModel):
+    """某一天的收付款合计与当日期末余额。"""
+
+    day: date
+    inflow_cents: int
+    outflow_cents: int
+    net_cents: int
+    closing_balance_cents: int
+    event_count: int
+
+
+class CategoryTerm(BaseModel):
+    """按事项类型汇总的收支结构。"""
+
+    event_type: str
+    label: str
+    direction: str
+    amount_cents: int
+    event_count: int
+    share_ratio: float
+
+
+class ArrivalTerm(BaseModel):
+    """待结算资金（尚未到账的计划收入）的到账时间分布。"""
+
+    day: date
+    amount_cents: int
+    event_count: int
+    titles: list[str] = Field(default_factory=list)
+
+
+class WindowSummary(BaseModel):
+    window_start: datetime
+    window_end: datetime
+    window_days: int
+    opening_balance_cents: int
+    closing_balance_cents: int
+    buffer_cents: int
+    scheduled_inflow_cents: int
+    scheduled_outflow_cents: int
+    net_change_cents: int
+    daily_terms: list[DailyTerm] = Field(default_factory=list)
+    category_terms: list[CategoryTerm] = Field(default_factory=list)
+    arrival_terms: list[ArrivalTerm] = Field(default_factory=list)
+    event_count: int = 0

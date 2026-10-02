@@ -65,6 +65,10 @@ desktop.ini
 # ---------- Build cache ----------
 *.tsbuildinfo
 
+# ---------- 临时截图（本地排查用） ----------
+shots-*.png
+shot-*.png
+
 # ---------- Playwright ----------
 playwright-report/
 test-results/

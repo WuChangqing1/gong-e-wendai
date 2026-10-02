@@ -23,9 +23,46 @@ test.describe('响应式与移动端', () => {
     await expect(page.locator('.gew-tabbar__item')).toHaveCount(5);
     await expect(page.locator('.gew-hero__amount')).toContainText('1,200');
 
+    // 窄屏隐藏左侧导航，宽度全部让给内容（历史缺陷：侧栏仍占 216px，内容被压到 150px）
+    await expect(page.locator('.gew-sider')).toBeHidden();
+    // 首屏主卡片（今日可提用）应当接近整屏宽度
+    const heroWidth = await page
+      .locator('.gew-hero')
+      .evaluate((node) => Math.round(node.getBoundingClientRect().width));
+    const viewportWidth = page.viewportSize()?.width ?? 0;
+    expect(heroWidth).toBeGreaterThan(viewportWidth * 0.8);
+
     await clickInBrowser(page.locator('.gew-tabbar'), '现金事件');
     await expect(page).toHaveURL(/\/events/);
     await expect(page.getByRole('heading', { name: '现金事件' })).toBeVisible();
+  });
+
+  test('分析页图表在窄屏占满宽度且正常渲染', async ({ page, request }) => {
+    const fixture = await createMerchantFixture(request, 'mobilecharts');
+    await loginViaUi(page, fixture.user.username);
+
+    // 深链可能被初始化竞态重定向，重试直到进入分析页
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await page.goto(appUrl('/analysis'));
+      await page.waitForTimeout(1500);
+      if (page.url().includes('/analysis')) break;
+    }
+    await expect(page.getByRole('heading', { name: '情景分析' })).toBeVisible({ timeout: 25_000 });
+
+    await expect(page.locator('.gew-chart canvas').first()).toBeVisible({ timeout: 25_000 });
+    expect(await page.locator('.gew-chart canvas').count()).toBeGreaterThanOrEqual(3);
+
+    const cardWidth = await page
+      .locator('.gew-card')
+      .first()
+      .evaluate((node) => Math.round(node.getBoundingClientRect().width));
+    const viewportWidth = page.viewportSize()?.width ?? 0;
+    expect(cardWidth).toBeGreaterThan(viewportWidth * 0.8);
+
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(1);
   });
 
   test('资金卡片在窄屏纵向堆叠且不横向溢出', async ({ page, request }) => {
@@ -82,7 +119,7 @@ test.describe('响应式与移动端', () => {
 
     await expect(page.locator('.gew-hero__amount')).toBeVisible({ timeout: 25_000 });
     await expect(page.getByText('当前可用')).toBeVisible();
-    await expect(page.getByText('待结算资金')).toBeVisible();
+    await expect(page.getByText('待结算资金').first()).toBeVisible();
     await expect(page.getByText('最紧张资金时点')).toBeVisible();
   });
 
