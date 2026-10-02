@@ -43,6 +43,9 @@ pnpm-debug.log*
 # ---------- Runtime data (never commit) ----------
 data/
 !data/.gitkeep
+# 测试用的固定参考向量属于源码，必须入库
+!backend/tests/data/
+!backend/tests/data/**
 uploads/
 !uploads/.gitkeep
 *.db
