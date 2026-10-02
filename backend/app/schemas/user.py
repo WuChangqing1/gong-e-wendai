@@ -6,11 +6,13 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.models.user import ALL_ROLES, ROLE_ADMIN
+from app.models.user import ALL_ROLES, ROLE_ADMIN, ROLE_CONSULTANT
 from app.schemas.common import ORMModel
 
 USERNAME_PATTERN = r"^[A-Za-z0-9_.-]{4,32}$"
-SELF_SERVICE_ROLES = ("merchant", "family_member", "consultant")
+#: 允许自助注册的角色。
+#: 咨询人员只能由管理员创建或授予；管理员只能由已有管理员或安全脚本创建。
+SELF_SERVICE_ROLES = ("merchant", "family_member")
 
 
 class UserPublic(ORMModel):
@@ -66,6 +68,10 @@ class RegisterRequest(BaseModel):
                 raise ValueError(f"不支持的业务角色：{item}")
             if item == ROLE_ADMIN:
                 raise ValueError("管理员账户不能自助注册")
+            if item == ROLE_CONSULTANT:
+                raise ValueError("咨询人员账户不能自助注册，请联系管理员开通")
+            if item not in SELF_SERVICE_ROLES:
+                raise ValueError(f"该角色不能自助注册：{item}")
         seen: list[str] = []
         for item in cleaned:
             if item not in seen:
