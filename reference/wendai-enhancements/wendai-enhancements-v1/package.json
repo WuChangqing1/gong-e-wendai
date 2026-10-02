@@ -1,0 +1,13 @@
+{
+  "name":"wendai-offline-enhancements",
+  "version":"1.0.0",
+  "private":true,
+  "type":"module",
+  "engines":{"node":">=24"},
+  "scripts":{
+    "test":"node --test --test-isolation=none tests/*.test.mjs",
+    "demo":"node scripts/report.mjs",
+    "build:offline":"node scripts/build-offline.mjs",
+    "serve":"node scripts/serve.mjs"
+  }
+}
