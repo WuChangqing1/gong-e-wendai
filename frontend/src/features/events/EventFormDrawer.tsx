@@ -25,6 +25,7 @@ import dayjs, { type Dayjs } from 'dayjs';
 
 import { cashEventApi, type CashEventPayload } from '@/api/cashflow';
 import { errorMessage } from '@/api/client';
+import { useDrawerWidth } from '@/hooks/useResponsive';
 import { DescriptionGrid, InlineNote } from '@/components/ui';
 import type { CashEvent } from '@/types';
 import { formatCny, yuanToCents } from '@/utils/money';
@@ -61,6 +62,7 @@ export default function EventFormDrawer({
   onRequestSmartInput?: () => void;
 }) {
   const { message } = AntdApp.useApp();
+  const drawerWidth = useDrawerWidth(560);
   const [form] = Form.useForm<FormValues>();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pending, setPending] = useState<FormValues | null>(null);
@@ -147,14 +149,16 @@ export default function EventFormDrawer({
   }, [event, pending]);
 
   const submit = async () => {
+    let values: FormValues;
     try {
-      await form.validateFields();
-      const values = form.getFieldsValue(true) as FormValues;
-      setPending(values);
-      setConfirmOpen(true);
+      // 必须先用校验结果驱动，确认通过后才展示确认摘要
+      values = await form.validateFields();
     } catch {
       message.warning('请先修正表单中的问题');
+      return;
     }
+    setPending(values);
+    setConfirmOpen(true);
   };
 
   const stateValue = Form.useWatch('state', form) ?? 'scheduled';
@@ -163,7 +167,7 @@ export default function EventFormDrawer({
     <>
       <Drawer
         title={isEdit ? `修改事项 · ${event?.cash_key}` : '新增收付款事项'}
-        width={560}
+        width={drawerWidth}
         open={open}
         onClose={onClose}
         destroyOnHidden
@@ -196,12 +200,15 @@ export default function EventFormDrawer({
             name="amount"
             label="金额（元）"
             rules={[
-              { required: true, message: '请输入金额' },
               {
-                validator: (_, value: number) => {
-                  const cents = yuanToCents(value);
+                validator: (_: unknown, value: unknown) => {
+                  if (value === null || value === undefined || value === '') {
+                    return Promise.reject(new Error('请输入金额'));
+                  }
+                  const cents = yuanToCents(value as number);
                   if (cents === null) return Promise.reject(new Error('金额格式不正确'));
                   if (cents < 0) return Promise.reject(new Error('金额不能为负数'));
+                  if (cents === 0) return Promise.reject(new Error('金额必须大于 0'));
                   return Promise.resolve();
                 },
               },
@@ -211,10 +218,15 @@ export default function EventFormDrawer({
               min={0}
               precision={2}
               step={100}
+              controls={false}
               style={{ width: '100%' }}
               size="large"
               placeholder="0.00"
               addonBefore="¥"
+              // 金额一律为整数分，这里阻止负号与非法字符进入输入
+              onKeyDown={(event) => {
+                if (['-', 'e', 'E', '+'].includes(event.key)) event.preventDefault();
+              }}
             />
           </Form.Item>
 

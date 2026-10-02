@@ -190,10 +190,26 @@ a:hover {
   max-width: 1440px;
   margin: 0 auto;
   width: 100%;
+  /* 宽表格只在自身容器内横向滚动，不允许撑出页面级横向滚动条。
+     使用 clip 而不是 hidden：hidden 会创建包含块，导致 fixed 定位的抽屉被裁切。 */
+  overflow-x: clip;
 }
 
 .gew-content--narrow {
   max-width: 960px;
+}
+
+/* 表格容器自身负责横向滚动，避免影响整页布局 */
+.gew-content .ant-table-wrapper,
+.gew-content .ant-table-content,
+.gew-content .ant-table-body {
+  max-width: 100%;
+}
+
+@media (max-width: 767px) {
+  .gew-content .ant-table-wrapper {
+    overflow-x: auto;
+  }
 }
 
 /* 移动端底部导航 */

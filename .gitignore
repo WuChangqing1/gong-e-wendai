@@ -62,6 +62,9 @@ backups/
 Thumbs.db
 desktop.ini
 
+# ---------- Build cache ----------
+*.tsbuildinfo
+
 # ---------- Playwright ----------
 playwright-report/
 test-results/

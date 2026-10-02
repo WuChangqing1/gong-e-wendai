@@ -28,6 +28,7 @@ import { useMutation } from '@tanstack/react-query';
 
 import { importApi } from '@/api/import';
 import { errorMessage } from '@/api/client';
+import { useDrawerWidth } from '@/hooks/useResponsive';
 import { DescriptionGrid, InlineNote, StatusTag } from '@/components/ui';
 import type { ImportPreview, ImportPreviewRow } from '@/types';
 import { formatCny } from '@/utils/money';
@@ -60,6 +61,7 @@ export default function ImportDrawer({
   onClose: () => void;
   onImported: () => void;
 }) {
+  const drawerWidth = useDrawerWidth(860);
   const { message } = AntdApp.useApp();
   const [step, setStep] = useState(0);
   const [fileType, setFileType] = useState<'transaction' | 'payment_plan'>('transaction');
@@ -183,7 +185,7 @@ export default function ImportDrawer({
   return (
     <Drawer
       title="导入 CSV"
-      width={860}
+      width={drawerWidth}
       open={open}
       onClose={() => {
         reset();

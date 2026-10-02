@@ -37,7 +37,7 @@ import {
 } from '@/utils/labels';
 
 const BUCKETS: { key: string; label: string }[] = [
-  { key: 'pending', label: '待处理' },
+  { key: 'submitted', label: '待处理' },
   { key: 'under_review', label: '处理中' },
   { key: 'need_more_information', label: '待补充' },
   { key: 'verified', label: '已核实' },
@@ -47,7 +47,8 @@ const BUCKETS: { key: string; label: string }[] = [
 export default function ConsultantWorkspacePage({ onlyRecords = false }: { onlyRecords?: boolean }) {
   const { message } = AntdApp.useApp();
   const queryClient = useQueryClient();
-  const [bucket, setBucket] = useState<string>(onlyRecords ? 'all' : 'pending');
+  // 「待处理」对应已提交、等待受理的事项
+  const [bucket, setBucket] = useState<string>(onlyRecords ? 'all' : 'submitted');
   const [page, setPage] = useState(1);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [verifyForm] = Form.useForm<{ resolution_summary: string }>();
@@ -68,9 +69,10 @@ export default function ConsultantWorkspacePage({ onlyRecords = false }: { onlyR
   };
 
   const startMutation = useMutation({
-    mutationFn: (id: string) => consultantApi.start(id),
-    onSuccess: () => {
-      message.success('已受理该事项');
+    mutationFn: ({ id, resume }: { id: string; resume?: boolean }) =>
+      consultantApi.start(id).then((data) => ({ data, resume })),
+    onSuccess: ({ resume }) => {
+      message.success(resume ? '已重新进入处理中' : '已受理该事项');
       invalidate();
     },
     onError: (error) => message.error(errorMessage(error)),
@@ -162,7 +164,7 @@ export default function ConsultantWorkspacePage({ onlyRecords = false }: { onlyR
       width: 100,
       render: (_value: unknown, row: ConsultationCase) => (
         <Button size="small" type="link" onClick={() => setDetailId(row.id)}>
-          受理
+          查看详情
         </Button>
       ),
     },
@@ -307,9 +309,16 @@ export default function ConsultantWorkspacePage({ onlyRecords = false }: { onlyR
                     type="primary"
                     disabled={detail.status !== 'submitted'}
                     loading={startMutation.isPending}
-                    onClick={() => startMutation.mutate(detail.id)}
+                    onClick={() => startMutation.mutate({ id: detail.id })}
                   >
                     受理并开始处理
+                  </Button>
+                  <Button
+                    disabled={detail.status !== 'need_more_information'}
+                    loading={startMutation.isPending}
+                    onClick={() => startMutation.mutate({ id: detail.id, resume: true })}
+                  >
+                    商户已补充，继续处理
                   </Button>
                 </Space>
 

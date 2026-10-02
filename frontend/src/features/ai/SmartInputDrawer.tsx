@@ -25,6 +25,7 @@ import { aiApi, type AiExtractedEvent } from '@/api/ai';
 import { cashEventApi } from '@/api/cashflow';
 import { AI_FALLBACK_MESSAGE, errorMessage } from '@/api/client';
 import EventFormDrawer from '@/features/events/EventFormDrawer';
+import { useDrawerWidth } from '@/hooks/useResponsive';
 import { DescriptionGrid, InlineNote, StatusTag } from '@/components/ui';
 import { formatCny } from '@/utils/money';
 import { formatDateTime } from '@/utils/datetime';
@@ -41,6 +42,7 @@ export default function SmartInputDrawer({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const drawerWidth = useDrawerWidth(560);
   const { message } = AntdApp.useApp();
   const [text, setText] = useState('');
   const [extracted, setExtracted] = useState<AiExtractedEvent | null>(null);
@@ -102,7 +104,7 @@ export default function SmartInputDrawer({
             <span>智能录入</span>
           </Space>
         }
-        width={560}
+        width={drawerWidth}
         open={open}
         onClose={() => {
           reset();

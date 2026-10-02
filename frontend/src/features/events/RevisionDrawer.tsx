@@ -6,6 +6,7 @@ import { Drawer, Empty, Skeleton, Space, Table, Tag, Tooltip } from 'antd';
 import { cashEventApi } from '@/api/cashflow';
 import { errorMessage } from '@/api/client';
 import { queryKeys } from '@/api/queryClient';
+import { useDrawerWidth } from '@/hooks/useResponsive';
 import { InlineNote, StatusTag } from '@/components/ui';
 import type { FieldChange } from '@/types';
 import { formatDateTime } from '@/utils/datetime';
@@ -19,6 +20,7 @@ export default function RevisionDrawer({
   open: boolean;
   onClose: () => void;
 }) {
+  const drawerWidth = useDrawerWidth(640);
   const query = useQuery({
     queryKey: queryKeys.cashEventRevisions(eventId ?? 'none'),
     queryFn: () => cashEventApi.revisions(eventId!),
@@ -34,7 +36,7 @@ export default function RevisionDrawer({
   return (
     <Drawer
       title={`版本历史${detailQuery.data ? ` · ${detailQuery.data.title}` : ''}`}
-      width={640}
+      width={drawerWidth}
       open={open}
       onClose={onClose}
       destroyOnHidden

@@ -7,6 +7,7 @@ import { EditOutlined } from '@ant-design/icons';
 import { cashEventApi } from '@/api/cashflow';
 import { errorMessage } from '@/api/client';
 import { queryKeys } from '@/api/queryClient';
+import { useDrawerWidth } from '@/hooks/useResponsive';
 import { DescriptionGrid, InlineNote, StatusTag } from '@/components/ui';
 import type { CashEvent } from '@/types';
 import { formatCny } from '@/utils/money';
@@ -30,6 +31,7 @@ export default function SourceDrawer({
   onClose: () => void;
   onEdit: (event: CashEvent) => void;
 }) {
+  const drawerWidth = useDrawerWidth(600);
   const query = useQuery({
     queryKey: [...queryKeys.cashEventDetail(eventId ?? 'none'), 'source'],
     queryFn: () => cashEventApi.source(eventId!),
@@ -41,7 +43,7 @@ export default function SourceDrawer({
   return (
     <Drawer
       title="来源与追踪"
-      width={600}
+      width={drawerWidth}
       open={open}
       onClose={onClose}
       destroyOnHidden

@@ -23,6 +23,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { householdApi, householdCardApi } from '@/api/household';
 import { errorMessage } from '@/api/client';
 import { queryKeys } from '@/api/queryClient';
+import { useDrawerWidth } from '@/hooks/useResponsive';
 import { InlineNote } from '@/components/ui';
 import type { AnalysisResult, CardType } from '@/types';
 import { formatCny } from '@/utils/money';
@@ -44,6 +45,7 @@ export default function ShareCardDrawer({
   cardType?: CardType;
   cashEventId?: string | null;
 }) {
+  const drawerWidth = useDrawerWidth(560);
   const { message } = AntdApp.useApp();
   const queryClient = useQueryClient();
   const [fields, setFields] = useState<string[]>(DEFAULT_FIELDS);
@@ -118,7 +120,7 @@ export default function ShareCardDrawer({
   return (
     <Drawer
       title="分享预览"
-      width={560}
+      width={drawerWidth}
       open={open}
       onClose={onClose}
       destroyOnHidden
@@ -156,9 +158,12 @@ export default function ShareCardDrawer({
               description="请先邀请家庭成员并使用邀请码加入，通过审核后才能分享。"
             />
           ) : (
-            <InlineNote tone="info">
-              将分享给：{members.map((item) => item.display_name).join('、')}
-            </InlineNote>
+            <div className="gew-desc-item">
+              <div className="gew-desc-item__label">分享对象（已加入的家庭成员）</div>
+              <div className="gew-desc-item__value">
+                {members.map((item) => item.display_name).join('、')}
+              </div>
+            </div>
           )}
 
           <div>
