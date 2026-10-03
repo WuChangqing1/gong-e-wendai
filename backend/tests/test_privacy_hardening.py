@@ -6,6 +6,21 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests import fixtures_api as api_fx
+from tests.conftest import login, register
+
+
+def _seed_opening_balance(client: TestClient) -> None:
+    """给已登录的商户登记期初资金（不重新注册、不重新登录）。"""
+    base = api_fx.anchor()
+    snapshot = client.post(
+        "/api/v1/account/snapshots",
+        json={
+            "opening_balance_cents": api_fx.MAIN_OPENING_BALANCE_CENTS,
+            "pending_settlement_cents": 0,
+            "snapshot_at": base.isoformat(),
+        },
+    )
+    assert snapshot.status_code == 201, snapshot.text
 
 
 # ---------------------------------------------------------------------------
@@ -341,3 +356,114 @@ class TestAdminModuleRemoved:
 
         assert "admin" not in ALL_ROLES
         assert set(ALL_ROLES) == {"merchant", "family_member", "consultant"}
+
+
+# ---------------------------------------------------------------------------
+# 三种业务身份 × 跨主体隔离（V3 第 105 / 126 节）
+# ---------------------------------------------------------------------------
+class TestCrossSubjectIsolation:
+    """三种身份一视同仁，但数据边界必须由**后端**强制。
+
+    这里验证的是「接口层面拿不到别人的数据」，而不是「前端没显示按钮」。
+    """
+
+    def test_merchant_cannot_read_other_merchant_data(
+        self, merchant_client: TestClient, second_merchant_client: TestClient
+    ):
+        # merchant_client 已经是注册并登录的甲商户（conftest 的 merchant_a）
+        _seed_opening_balance(merchant_client)
+        for payload in api_fx.event_payloads():
+            created = merchant_client.post("/api/v1/cash-events", json=payload)
+            assert created.status_code == 201, created.text
+        mine = merchant_client.get("/api/v1/cash-events").json()
+        assert mine["meta"]["total"] > 0
+        first_id = mine["items"][0]["id"]
+
+        # 乙商户看自己的数据：应为空，绝不能出现甲商户的事项
+        other_list = second_merchant_client.get("/api/v1/cash-events").json()
+        assert other_list["meta"]["total"] == 0, other_list
+        assert other_list["items"] == []
+
+        # 乙商户按 id 直接读取甲商户的事项：必须 404（不是 403，避免泄露「存在」）
+        assert second_merchant_client.get(f"/api/v1/cash-events/{first_id}").status_code == 404
+        assert (
+            second_merchant_client.get(f"/api/v1/cash-events/{first_id}/revisions").status_code
+            == 404
+        )
+        assert (
+            second_merchant_client.get(f"/api/v1/cash-events/{first_id}/source").status_code == 404
+        )
+
+    def test_family_member_cannot_read_merchant_endpoints(
+        self, client: TestClient, merchant_client: TestClient
+    ):
+        _seed_opening_balance(merchant_client)
+        client.cookies.clear()
+        register(client, username="family_only_v3", roles=["family_member"])
+        client.cookies.clear()
+        assert login(client, username="family_only_v3").status_code == 200
+
+        for path in (
+            "/api/v1/cash-events",
+            "/api/v1/account/overview",
+            "/api/v1/analysis/today",
+            "/api/v1/enhancements/overview",
+            "/api/v1/history/daily",
+            "/api/v1/settlement-records",
+            "/api/v1/consultations",
+        ):
+            assert client.get(path).status_code == 403, path
+
+    def test_family_member_only_sees_shared_fields(self, client: TestClient):
+        """家庭成员只能读经营者持久化后的白名单字段，不能靠 cash_event_id 补全。"""
+        client.cookies.clear()
+        register(client, username="family_share_v3", roles=["family_member"])
+        client.cookies.clear()
+        assert login(client, username="family_share_v3").status_code == 200
+
+        # 没有任何分享时，卡片列表为空；不会因为知道 id 就能读到内容
+        assert client.get("/api/v1/household-cards").json() == []
+
+    def test_consultant_cannot_read_merchant_or_household_private(
+        self, consultant_client: TestClient, merchant_client: TestClient
+    ):
+        _seed_opening_balance(merchant_client)
+        for path in (
+            "/api/v1/cash-events",
+            "/api/v1/account/overview",
+            "/api/v1/analysis/today",
+            "/api/v1/enhancements/overview",
+            "/api/v1/history/daily",
+            "/api/v1/merchant/profile",
+        ):
+            assert consultant_client.get(path).status_code == 403, path
+
+        # 咨询人员只能看到咨询队列，且队列里没有商户的经营金额汇总
+        queue = consultant_client.get("/api/v1/consultations/queue")
+        assert queue.status_code == 200
+        for item in queue.json()["items"]:
+            for forbidden in (
+                "opening_balance_cents",
+                "buffer_cents",
+                "max_withdrawable_cents",
+                "payment_gap_cents",
+                "buffer_gap_cents",
+            ):
+                assert forbidden not in item, (forbidden, item)
+
+    def test_no_role_can_reach_ops_or_management_api(
+        self,
+        client: TestClient,
+        merchant_client: TestClient,
+        consultant_client: TestClient,
+    ):
+        """V3：系统运维与平台用户管理不属于本模块，任何身份都拿不到。"""
+        for path in (
+            "/api/v1/admin/overview",
+            "/api/v1/admin/users",
+            "/api/v1/admin/runtime",
+            "/api/v1/admin/audit-logs",
+        ):
+            assert client.get(path).status_code == 404, path
+            assert merchant_client.get(path).status_code == 404, path
+            assert consultant_client.get(path).status_code == 404, path
