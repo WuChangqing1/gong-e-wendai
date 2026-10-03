@@ -19,6 +19,15 @@ log() { printf '\n=== %s ===\n' "$1"; }
 
 cd "$APP_DIR"
 
+# 先加载生产环境变量：备份脚本、迁移与启动都依赖 DATABASE_URL 指向
+# 持久数据目录（~/apps/gong-e-wendai-data/app.db），而不是代码目录下的默认路径。
+if [ ! -f "$APP_DIR/.env.production" ]; then
+  echo "缺少 $APP_DIR/.env.production" >&2
+  exit 2
+fi
+set -a; . "$APP_DIR/.env.production"; set +a
+echo "DATABASE_URL=${DATABASE_URL:-<unset>}"
+
 log "1/8 备份数据库"
 "$PY" scripts/backup_db.py
 ls -la "$DATA_DIR/backups/" | tail -3
@@ -55,7 +64,6 @@ log "5/8 安装 Python 依赖"
 
 log "6/8 数据库迁移（必须在重启前完成）"
 cd "$APP_DIR/backend"
-set -a; . "$APP_DIR/.env.production"; set +a
 "$PY" -m alembic current
 "$PY" -m alembic upgrade head
 "$PY" -m alembic current
