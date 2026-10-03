@@ -64,20 +64,38 @@ test.describe('图表化分析', () => {
     await expect(page.getByText('进货款').first()).toBeVisible({ timeout: 15_000 });
   });
 
-  test('说明文字收进可展开区域', async ({ page, request }) => {
+  test('计算详情收进可展开区域', async ({ page, request }) => {
     const fixture = await createMerchantFixture(request, 'collapsed');
     await loginViaUi(page, fixture.user.username);
     await gotoAuthed(page, '/analysis');
 
-    const toggle = page.getByText('说明与口径（点击展开）');
+    const toggle = page.getByText('计算详情');
     await expect(toggle).toBeVisible({ timeout: 25_000 });
 
-    // 默认收起：口径说明不可见
-    const note = page.getByText(/页面上的图表只是把同一份计算结果/);
+    // 默认收起：共同约束口径说明不可见
+    const note = page.getByText(/同时满足所有情景的可提用上限/);
     await expect(note).toBeHidden();
 
     await toggle.click();
     await expect(note).toBeVisible({ timeout: 15_000 });
+  });
+
+  test('用户界面不出现开发口径说明', async ({ page, request }) => {
+    const fixture = await createMerchantFixture(request, 'nofdevcopy');
+    await loginViaUi(page, fixture.user.username);
+
+    for (const [route, forbidden] of [
+      ['/today', ['确定性计算引擎', '计算引擎版本']],
+      ['/analysis', ['说明与口径', '换成图形表达']],
+      ['/settings', ['API Key', '密钥', '环境变量', '文字识别模型']],
+    ] as const) {
+      await gotoAuthed(page, route);
+      await page.waitForTimeout(1200);
+      const text = await page.locator('body').innerText();
+      for (const word of forbidden) {
+        expect(text, `${route} 不应出现「${word}」`).not.toContain(word);
+      }
+    }
   });
 
   test('窗口聚合接口与引擎口径一致', async ({ page, request }) => {

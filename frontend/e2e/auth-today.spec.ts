@@ -114,8 +114,13 @@ test.describe('今日决策', () => {
     await expect(page.getByText('基础数据')).toBeVisible();
     await expect(page.getByText('余额推演')).toBeVisible();
     await expect(page.getByText('结论', { exact: true })).toBeVisible();
-    await expect(page.getByText('计算引擎版本')).toBeVisible();
-    await expect(page.getByText('2.0.0')).toBeVisible();
+    // 金额口径必须完整呈现；引擎版本属于内部实现，不在用户界面展示
+    const drawer = page.locator('.ant-drawer-body');
+    await expect(drawer.getByText('最紧张时点余额')).toBeVisible();
+    await expect(drawer.getByText('扣除经营留底后可提用')).toBeVisible();
+    await expect(drawer.getByText('付款缺口', { exact: true })).toBeVisible();
+    await expect(drawer.getByText('留底缺口', { exact: true })).toBeVisible();
+    await expect(page.getByText('计算引擎版本')).toBeHidden();
   });
 
   test('未来趋势图渲染且图例用文字表达风险', async ({ page, request }) => {

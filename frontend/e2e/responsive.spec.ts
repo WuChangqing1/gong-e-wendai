@@ -169,7 +169,7 @@ test.describe('响应式与移动端', () => {
 
     const menu = page.getByTestId('settings-menu');
     await expect(menu).toBeVisible({ timeout: 25_000 });
-    for (const label of ['个人资料', '经营资料', '家庭设置', '安全设置', '智能服务状态']) {
+    for (const label of ['个人资料', '经营资料', '家庭设置', '安全设置', '智能助手']) {
       await expect(menu).toContainText(label);
     }
     // 窄屏不出现横向页签（V3 第 80 节：用列表项而不是卡片网格）
