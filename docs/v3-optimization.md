@@ -102,7 +102,7 @@ Windows 的**机器级**环境变量位于
 | 前端 typecheck | 通过 |
 | 前端 lint | 通过（`--max-warnings 0`） |
 | 前端 build | 通过（入口 chunk 299KB → 291KB） |
-| Playwright E2E | **40 通过 / 1 跳过** |
+| Playwright E2E | **41 通过 / 1 跳过** |
 | 视口验收 | 360/375/390/430/768/1024/1440 × 6 路由：零页面级横向滚动、断点行为正确 |
 | Alembic | `7b1c4d9e2f30` 在真实数据上迁移成功 |
 | Secret check | 通过 |

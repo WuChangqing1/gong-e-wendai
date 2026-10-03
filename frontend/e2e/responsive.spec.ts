@@ -226,4 +226,29 @@ test.describe('响应式与移动端', () => {
     );
     expect(overflow).toBeLessThanOrEqual(1);
   });
+
+  test('改变视口不触发新的接口请求', async ({ page, request }) => {
+    const fixture = await createMerchantFixture(request, 'mobileresize');
+    await loginViaUi(page, fixture.user.username);
+
+    const calls: string[] = [];
+    page.on('request', (req) => {
+      if (req.url().includes('/api/v1/') && req.method() === 'GET') calls.push(req.url());
+    });
+
+    for (const route of ['/today', '/events']) {
+      await page.goto(appUrl(route));
+      await page.waitForTimeout(2500);
+      const afterLoad = calls.length;
+      expect(afterLoad, `${route} 首屏应发起过请求`).toBeGreaterThan(0);
+
+      // 连续跨越断点：desktop → tablet → mobile → desktop
+      for (const width of [900, 390, 430, 1440]) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.waitForTimeout(1200);
+      }
+      const added = calls.length - afterLoad;
+      expect(added, `${route} 视口变化后不应新增接口请求（实际新增 ${added} 次）`).toBe(0);
+    }
+  });
 });
