@@ -35,7 +35,16 @@ tar czf "$HOME/apps/gong-e-wendai-pre-v2-$STAMP.tar.gz" \
 ls -la "$HOME/apps/gong-e-wendai-pre-v2-$STAMP.tar.gz"
 
 log "4/8 更新代码（保留数据目录）"
-git fetch origin --quiet
+# 服务器没有 GitHub 凭据，因此支持两种方式：
+#   1. 能直连 origin 时：git fetch origin
+#   2. 否则使用本地打包的 git bundle：
+#        BUNDLE=/tmp/x.bundle bash scripts/deploy_v2.sh
+if [ -n "${BUNDLE:-}" ] && [ -f "${BUNDLE:-}" ]; then
+  echo "使用 git bundle：$BUNDLE"
+  git fetch "$BUNDLE" main:refs/remotes/origin/main
+else
+  git fetch origin --quiet
+fi
 git reset --hard origin/main
 git log --oneline -1
 
