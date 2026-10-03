@@ -49,6 +49,9 @@ export function yuanAxisLabel(value: number): string {
 /** 图表容器通用 tooltip 样式。 */
 export const TOOLTIP_STYLE = {
   trigger: 'axis' as const,
+  // 让触摸设备可用：`mousemove` 之外同时监听 tap，
+  // 手机没有 hover，重要信息不能只能靠悬停看到。
+  triggerOn: 'mousemove|click' as const,
   axisPointer: { type: 'shadow' as const },
   backgroundColor: 'rgba(255,255,255,0.98)',
   borderColor: '#E8E8E8',
@@ -56,5 +59,30 @@ export const TOOLTIP_STYLE = {
   textStyle: { color: '#1F1F1F', fontSize: 12 },
   extraCssText: 'box-shadow: 0 2px 8px rgba(15,23,42,0.08); border-radius: 8px;',
 };
+
+/**
+ * 手机端 X 轴标签精简参数。
+ *
+ * 窄屏（约 316px 画布）放不下「10月3日 / 周六」两行标签乘以 8-9 个刻度，
+ * 因此手机端只显示日期（`10/3`），并把标签字号提到 12px。
+ */
+export const MOBILE_AXIS_LABEL = {
+  fontSize: 12,
+  interval: 'auto' as const,
+  hideOverlap: true,
+};
+
+/** 手机端图例：移到图表下方一行，避免与标题、坐标轴挤在顶部。 */
+export const MOBILE_LEGEND = {
+  bottom: 0,
+  left: 'center' as const,
+  itemWidth: 10,
+  itemHeight: 10,
+  itemGap: 12,
+  textStyle: { color: '#666', fontSize: 12 },
+};
+
+/** 手机端网格：给底部图例留出空间。 */
+export const MOBILE_GRID = { left: 8, right: 12, top: 24, bottom: 44, containLabel: true };
 
 export default echarts;

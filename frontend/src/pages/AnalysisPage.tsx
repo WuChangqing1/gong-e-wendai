@@ -233,19 +233,42 @@ export default function AnalysisPage() {
 
       {mode === 'delayed' || mode === 'joint' ? (
         <SectionCard flat bodyClassName="gew-card__body--tight">
-          <Space wrap align="center">
-            <span style={{ color: 'var(--text-secondary)' }}>假设收款推迟天数</span>
-            <InputNumber
-              min={1}
-              max={30}
-              value={delayDays}
-              onChange={(value) => setDelayDays(Number(value ?? 3))}
-              addonAfter="天"
-            />
-            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-              共同约束模式下，系统分别计算按时到账与延迟到账，并取两者中最保守的可提用上限。
-            </span>
-          </Space>
+          <div className="gew-delay-row">
+            <span style={{ color: 'var(--text-secondary)' }}>如果收款推迟</span>
+            {/* 步进器比数字输入框更适合手机：大按钮、无需键盘。 */}
+            <div className="gew-stepper">
+              <Button
+                aria-label="减少一天"
+                disabled={delayDays <= 1}
+                onClick={() => setDelayDays((value) => Math.max(1, value - 1))}
+              >
+                −
+              </Button>
+              <span className="gew-stepper__value num">{delayDays} 天</span>
+              <Button
+                aria-label="增加一天"
+                disabled={delayDays >= 30}
+                onClick={() => setDelayDays((value) => Math.min(30, value + 1))}
+              >
+                +
+              </Button>
+            </div>
+            <Space size={4} wrap>
+              {[1, 2, 3, 7].map((day) => (
+                <Button
+                  key={day}
+                  size="small"
+                  type={delayDays === day ? 'primary' : 'default'}
+                  onClick={() => setDelayDays(day)}
+                >
+                  {day} 天
+                </Button>
+              ))}
+            </Space>
+          </div>
+          <div className="gew-delay-row__hint">
+            共同约束模式下，系统分别计算按时到账与延迟到账，并取两者中最保守的可提用上限。
+          </div>
         </SectionCard>
       ) : null}
 

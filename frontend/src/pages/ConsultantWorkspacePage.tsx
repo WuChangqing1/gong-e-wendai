@@ -24,7 +24,16 @@ import { ReloadOutlined } from '@ant-design/icons';
 import { consultantApi } from '@/api/consultation';
 import { errorMessage } from '@/api/client';
 import { queryKeys } from '@/api/queryClient';
-import { DescriptionGrid, InlineNote, MetricCard, PageHeader, SectionCard, StatusTag } from '@/components/ui';
+import {
+  DescriptionGrid,
+  InlineNote,
+  MetricCard,
+  PageHeader,
+  ResponsiveDataView,
+  SectionCard,
+  StatusTag,
+} from '@/components/ui';
+import MobileConsultationList from '@/features/consultation/MobileConsultationList';
 import type { ConsultationCase, ConsultationStatus } from '@/types';
 import { formatCny } from '@/utils/money';
 import { formatDateTime } from '@/utils/datetime';
@@ -218,23 +227,39 @@ export default function ConsultantWorkspacePage({ onlyRecords = false }: { onlyR
       </Row>
 
       <SectionCard title="咨询事项">
-        <Table<ConsultationCase>
-          rowKey="id"
-          size="middle"
-          columns={columns}
-          dataSource={items}
-          loading={queueQuery.isLoading}
-          scroll={{ x: 980 }}
-          locale={{
-            emptyText: <Empty description="该分组下暂无事项" image={Empty.PRESENTED_IMAGE_SIMPLE} />,
-          }}
-          pagination={{
-            current: queueQuery.data?.meta.page ?? 1,
-            pageSize: 10,
-            total: queueQuery.data?.meta.total ?? 0,
-            showSizeChanger: false,
-            onChange: setPage,
-          }}
+        <ResponsiveDataView
+          mobileCards={
+            <MobileConsultationList
+              items={items}
+              loading={queueQuery.isLoading}
+              onOpen={(row) => setDetailId(row.id)}
+              onCreate={() => undefined}
+              emptyDescription="该分组下暂无事项"
+              emptyActionLabel="刷新"
+            />
+          }
+          desktopTable={
+            <Table<ConsultationCase>
+              rowKey="id"
+              size="middle"
+              columns={columns}
+              dataSource={items}
+              loading={queueQuery.isLoading}
+              scroll={{ x: 980 }}
+              locale={{
+                emptyText: (
+                  <Empty description="该分组下暂无事项" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                ),
+              }}
+              pagination={{
+                current: queueQuery.data?.meta.page ?? 1,
+                pageSize: 10,
+                total: queueQuery.data?.meta.total ?? 0,
+                showSizeChanger: false,
+                onChange: setPage,
+              }}
+            />
+          }
         />
       </SectionCard>
 

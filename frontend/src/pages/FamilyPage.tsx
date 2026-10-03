@@ -31,7 +31,15 @@ import { analysisApi } from '@/api/cashflow';
 import { householdApi } from '@/api/household';
 import { errorMessage } from '@/api/client';
 import { queryKeys } from '@/api/queryClient';
-import { DescriptionGrid, InlineNote, PageHeader, SectionCard, StatusTag } from '@/components/ui';
+import {
+  DescriptionGrid,
+  InlineNote,
+  PageHeader,
+  ResponsiveDataView,
+  SectionCard,
+  StatusTag,
+} from '@/components/ui';
+import MobileMemberList from '@/features/household/MobileMemberList';
 import ShareCardDrawer from '@/features/household/ShareCardDrawer';
 import type { HouseholdMember } from '@/types';
 import { formatDateTime } from '@/utils/datetime';
@@ -290,83 +298,104 @@ export default function FamilyPage() {
           ) : null}
 
           <SectionCard title="家庭成员">
-            <Table<HouseholdMember>
-              rowKey="membership_id"
-              size="middle"
-              pagination={false}
-              dataSource={members}
-              locale={{
-                emptyText: (
-                  <Empty description="还没有家庭成员加入" image={Empty.PRESENTED_IMAGE_SIMPLE}>
-                    <Button icon={<UserAddOutlined />} onClick={copyInvite}>
-                      复制邀请码并邀请
-                    </Button>
-                  </Empty>
-                ),
-              }}
-              columns={[
-                { title: '称呼', dataIndex: 'display_name' },
-                { title: '账户', dataIndex: 'username', render: (value: string) => <span className="num">{value}</span> },
-                {
-                  title: '关系',
-                  dataIndex: 'relation_label',
-                  width: 110,
-                  render: (value: string | null) => value ?? '—',
-                },
-                {
-                  title: '状态',
-                  dataIndex: 'status',
-                  width: 110,
-                  render: (value: string) => (
-                    <StatusTag tone={STATUS_TONE[value] ?? 'neutral'}>
-                      {STATUS_LABEL[value] ?? value}
-                    </StatusTag>
-                  ),
-                },
-                {
-                  title: '加入时间',
-                  dataIndex: 'joined_at',
-                  width: 160,
-                  render: (value: string | null) => (value ? formatDateTime(value) : '—'),
-                },
-                {
-                  title: '操作',
-                  key: 'actions',
-                  width: 170,
-                  render: (_value, row) => (
-                    <Space size={4}>
-                      {row.status === 'pending' ? (
-                        <Button
-                          size="small"
-                          type="primary"
-                          loading={approveMutation.isPending}
-                          onClick={() => approveMutation.mutate(row.membership_id)}
-                        >
-                          通过申请
+            <ResponsiveDataView
+              mobileCards={
+                <MobileMemberList
+                  members={members}
+                  approvePending={approveMutation.isPending}
+                  onApprove={(membershipId) => approveMutation.mutate(membershipId)}
+                  onInvite={copyInvite}
+                  onRemove={(row) =>
+                    modal.confirm({
+                      title: '确认移除成员',
+                      content: `将移除 ${row.display_name}，其已查看的卡片与反馈仍保留在记录中。`,
+                      okText: '确认移除',
+                      cancelText: '取消',
+                      onOk: () => removeMutation.mutate(row.membership_id),
+                    })
+                  }
+                />
+              }
+              desktopTable={
+                <Table<HouseholdMember>
+                  rowKey="membership_id"
+                  size="middle"
+                  pagination={false}
+                  dataSource={members}
+                  locale={{
+                    emptyText: (
+                      <Empty description="还没有家庭成员加入" image={Empty.PRESENTED_IMAGE_SIMPLE}>
+                        <Button icon={<UserAddOutlined />} onClick={copyInvite}>
+                          复制邀请码并邀请
                         </Button>
-                      ) : null}
-                      {row.status !== 'removed' ? (
-                        <Button
-                          size="small"
-                          danger
-                          type="text"
-                          onClick={() =>
-                            modal.confirm({
-                              title: '确认移除成员',
-                              content: `将移除 ${row.display_name}，其已查看的卡片与反馈仍保留在记录中。`,
-                              okText: '确认移除',
-                              cancelText: '取消',
-                              onOk: () => removeMutation.mutate(row.membership_id),
-                            })
-                          }
-                        >
-                          移除
-                        </Button>
-                      ) : null}
-                    </Space>
-                  ),
-                },
-              ]}
+                      </Empty>
+                    ),
+                  }}
+                  columns={[
+                    { title: '称呼', dataIndex: 'display_name' },
+                    { title: '账户', dataIndex: 'username', render: (value: string) => <span className="num">{value}</span> },
+                    {
+                      title: '关系',
+                      dataIndex: 'relation_label',
+                      width: 110,
+                      render: (value: string | null) => value ?? '—',
+                    },
+                    {
+                      title: '状态',
+                      dataIndex: 'status',
+                      width: 110,
+                      render: (value: string) => (
+                        <StatusTag tone={STATUS_TONE[value] ?? 'neutral'}>
+                          {STATUS_LABEL[value] ?? value}
+                        </StatusTag>
+                      ),
+                    },
+                    {
+                      title: '加入时间',
+                      dataIndex: 'joined_at',
+                      width: 160,
+                      render: (value: string | null) => (value ? formatDateTime(value) : '—'),
+                    },
+                    {
+                      title: '操作',
+                      key: 'actions',
+                      width: 170,
+                      render: (_value, row) => (
+                        <Space size={4}>
+                          {row.status === 'pending' ? (
+                            <Button
+                              size="small"
+                              type="primary"
+                              loading={approveMutation.isPending}
+                              onClick={() => approveMutation.mutate(row.membership_id)}
+                            >
+                              通过申请
+                            </Button>
+                          ) : null}
+                          {row.status !== 'removed' ? (
+                            <Button
+                              size="small"
+                              danger
+                              type="text"
+                              onClick={() =>
+                                modal.confirm({
+                                  title: '确认移除成员',
+                                  content: `将移除 ${row.display_name}，其已查看的卡片与反馈仍保留在记录中。`,
+                                  okText: '确认移除',
+                                  cancelText: '取消',
+                                  onOk: () => removeMutation.mutate(row.membership_id),
+                                })
+                              }
+                            >
+                              移除
+                            </Button>
+                          ) : null}
+                        </Space>
+                      ),
+                    },
+                  ]}
+                />
+              }
             />
           </SectionCard>
 

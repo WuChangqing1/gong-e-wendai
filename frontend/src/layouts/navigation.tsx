@@ -23,10 +23,17 @@ export interface NavItem {
   mobile?: boolean;
 }
 
+/**
+ * 经营者导航。
+ *
+ * `mobile: false` 的项只出现在桌面左侧栏：手机底部标签栏最多 5 项，
+ * 情景分析改由「今日决策」页的入口进入（`/analysis` 路由仍然存在，
+ * 手机与桌面使用同一个地址）。
+ */
 export const MERCHANT_NAV: NavItem[] = [
   { key: 'today', path: '/today', label: '今日决策', icon: <DashboardOutlined />, mobile: true },
   { key: 'events', path: '/events', label: '现金事件', icon: <AppstoreOutlined />, mobile: true },
-  { key: 'analysis', path: '/analysis', label: '情景分析', icon: <BarChartOutlined />, mobile: true },
+  { key: 'analysis', path: '/analysis', label: '情景分析', icon: <BarChartOutlined /> },
   { key: 'family', path: '/family', label: '家庭协同', icon: <TeamOutlined />, mobile: true },
   {
     key: 'consultations',
@@ -35,7 +42,7 @@ export const MERCHANT_NAV: NavItem[] = [
     icon: <MessageOutlined />,
     mobile: true,
   },
-  { key: 'settings', path: '/settings', label: '我的', icon: <SettingOutlined /> },
+  { key: 'settings', path: '/settings', label: '我的', icon: <SettingOutlined />, mobile: true },
 ];
 
 export const CONSULTANT_NAV: NavItem[] = [

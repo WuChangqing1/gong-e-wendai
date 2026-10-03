@@ -694,8 +694,10 @@ a:hover {
 }
 
 @media (max-width: 767px) {
+  /* 手机端图表高度由组件按内容计算（inline style），这里不再固定覆盖，
+     否则「阶梯线」这类需要更高画布的图会被压扁。 */
   .gew-chart {
-    height: 260px;
+    width: 100%;
   }
 }
 
@@ -824,6 +826,184 @@ a:hover {
   margin: 0;
   max-height: 260px;
   overflow: auto;
+}
+
+/* ---------------- 延期天数步进器（手机友好） ---------------- */
+.gew-delay-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.gew-delay-row__hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.gew-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.gew-stepper .ant-btn {
+  border: none;
+  border-radius: 0;
+  min-width: 44px;
+  height: 40px;
+  font-size: 16px;
+}
+
+.gew-stepper__value {
+  min-width: 64px;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 0 6px;
+}
+
+@media (max-width: 767px) {
+  /* 手机上步进器独占一行，快捷天数换行排列 */
+  .gew-delay-row {
+    gap: var(--space-2);
+  }
+
+  .gewstepper,
+  .gew-stepper {
+    order: -1;
+  }
+}
+
+/* ---------------- 手机端咨询卡片列表 ---------------- */
+.gew-consult-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.gew-consult-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gew-consult-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.gew-consult-card__no {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.gew-consult-card__type {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.gew-consult-card__question {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.gew-consult-card__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  border-top: 1px dashed var(--divider);
+  padding-top: 2px;
+}
+
+.gew-consult-card__time {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ---------------- 手机端家庭成员卡片 ---------------- */
+.gew-member-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.gew-member-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.gew-member-card__name {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.gew-member-card__meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* ---------------- 手机端历史数据分组卡片 ---------------- */
+.gew-history-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.gew-history-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface);
+}
+
+.gew-history-card__day {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.gew-history-card__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: 13px;
+  padding: 4px 0;
+}
+
+.gew-history-card__label {
+  color: var(--text-secondary);
 }
 
 /* ---------------- 手机端事项卡片列表 ----------------
