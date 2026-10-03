@@ -41,6 +41,7 @@ import {
 } from '@/components/ui';
 import AiExplainPanel from '@/features/ai/AiExplainPanel';
 import AnalysisChartsPanel from '@/features/analysis/AnalysisChartsPanel';
+import EnhancementPanel from '@/features/enhancement/EnhancementPanel';
 import ShareCardDrawer from '@/features/household/ShareCardDrawer';
 import type { AnalysisMode, AnalysisResult } from '@/types';
 import { formatCny, splitCny } from '@/utils/money';
@@ -426,6 +427,9 @@ export default function TodayPage() {
               </div>
             </Col>
           </Row>
+
+          {/* 资金安排参考：结算延期压力 / 未来 7 天日常收付参考 / 建议经营留底 */}
+          <EnhancementPanel />
 
           <AiExplainPanel result={result} />
         </>

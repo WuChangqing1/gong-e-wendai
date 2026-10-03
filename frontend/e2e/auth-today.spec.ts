@@ -116,7 +116,13 @@ test.describe('今日决策', () => {
     );
     await expect(page.getByText('0 元线（付款缺口）')).toBeVisible();
     await expect(page.getByText(/经营留底 ¥600\.00/)).toBeVisible();
-    await expect(page.getByText(/可提用 ¥1,200\.00/)).toBeVisible();
+    // 「可提用 ¥1,200.00」同时出现在图例与资金安排参考里，限定到趋势图卡片内
+    await expect(
+      page
+        .locator('.gew-card')
+        .filter({ hasText: '未来 7 天资金趋势' })
+        .getByText(/可提用 ¥1,200\.00/),
+    ).toBeVisible();
   });
 
   test('到账延迟情景不能提用，且不得描述为资金安排可行', async ({ page, request }) => {
@@ -146,7 +152,7 @@ test.describe('今日决策', () => {
     });
     await expect(page.getByText(/最保守的结果来自「到账延迟」情景/)).toBeVisible();
     await expect(page.locator('.gew-hero__label')).not.toContainText('资金安排可行');
-    // 明确说明「可提用 0 元」不代表可行
-    await expect(page.locator('.gew-hero__hint').first()).toContainText('即使不提用');
+    // 首屏必须明确说明「即使不提用也仍存在缺口」
+    await expect(page.locator('.gew-hero')).toContainText('即使不提用');
   });
 });

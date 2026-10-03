@@ -13,6 +13,7 @@ import {
   Select,
   Space,
   Table,
+  Tabs,
   Tag,
   Tooltip,
 } from 'antd';
@@ -37,6 +38,7 @@ import RevisionDrawer from '@/features/events/RevisionDrawer';
 import SourceDrawer from '@/features/events/SourceDrawer';
 import SmartInputDrawer from '@/features/ai/SmartInputDrawer';
 import ImportDrawer from '@/features/import/ImportDrawer';
+import { HistoryPane, SettlementPane } from '@/features/enhancement/HistoryPanes';
 import type { CashEvent, Direction } from '@/types';
 import { formatCny, formatSigned } from '@/utils/money';
 import { formatDateTime } from '@/utils/datetime';
@@ -67,6 +69,7 @@ export default function EventsPage() {
   const [sourceId, setSourceId] = useState<string | null>(null);
   const [smartOpen, setSmartOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [tab, setTab] = useState<'events' | 'history' | 'settlements'>('events');
 
   const focusId = searchParams.get('focus');
   useEffect(() => {
@@ -256,6 +259,22 @@ export default function EventsPage() {
         }
       />
 
+      <Tabs
+        activeKey={tab}
+        onChange={(key) => setTab(key as 'events' | 'history' | 'settlements')}
+        items={[
+          { key: 'events', label: '收付款事项' },
+          { key: 'history', label: '历史经营数据' },
+          { key: 'settlements', label: '结算记录' },
+        ]}
+      />
+
+      {tab === 'history' ? (
+        <HistoryPane />
+      ) : tab === 'settlements' ? (
+        <SettlementPane />
+      ) : (
+        <>
       <div
         style={{
           display: 'grid',
@@ -423,6 +442,8 @@ export default function EventsPage() {
           }}
         />
       </SectionCard>
+        </>
+      )}
 
       <EventFormDrawer
         open={formOpen}
