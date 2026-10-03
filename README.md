@@ -9,6 +9,9 @@
 系统不接受“拍脑袋”的答案：所有金额、时间、余额、可提用金额、缺口都由**确定性计算引擎**给出，
 智能服务只负责理解、提取、整理与表达，**不参与任何金额计算**，也不得覆盖计算结果。
 
+> 队友想看**精简版介绍、四个角色能用的功能、演示账号密码**：直接读
+> [`项目介绍与使用指南.md`](项目介绍与使用指南.md)。
+
 ---
 
 ## 1. 核心链路
@@ -231,7 +234,23 @@ npm run test:e2e
 `E2E_ADMIN_USERNAME` / `E2E_ADMIN_PASSWORD`；未提供时该用例跳过
 （服务端权限已由后端测试覆盖）。
 
-### 5.3 推送前必须执行
+### 5.3 提交前守卫（每个克隆执行一次）
+
+`powershell
+git config core.hooksPath .githooks
+`
+
+启用后每次 `git commit` 都会自动扫描暂存内容，阻止密钥与禁止入库的文件进入历史。
+GitHub 的 secret scanning 不认识智谱密钥形态，因此这道本地守卫是主要防线。
+
+需要手动检查全部历史时：
+
+`powershell
+python scripts\scan_history.py        # 遍历所有提交
+python scripts\audit_key_exposure.py  # 遍历所有仓库 + 线上资源（需 GLM 环境变量）
+`
+
+### 5.4 推送前必须执行
 
 ```powershell
 conda activate gonghangcup

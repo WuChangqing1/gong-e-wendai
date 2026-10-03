@@ -1,0 +1,34 @@
+#!/usr/bin/env sh
+# 工 e 稳袋 · 提交前守卫
+#
+# 安装（每个克隆只需一次）：
+#   git config core.hooksPath .githooks
+#
+# 作用：提交前扫描暂存内容，阻止密钥与禁止入库的文件进入历史。
+# 这是本仓库的主要防线 —— GitHub 的 secret scanning 不认识智谱密钥形态。
+#
+# 需要跳过时（确认没有敏感信息）：
+#   git commit --no-verify
+
+# 找一个**真正可用**的 python。
+#
+# 注意：Windows 上 `python3` 常常是 Microsoft Store 的占位程序，
+# `command -v` 能找到它，但执行会以非零码退出（实测 49），
+# 导致提交被静默拦截。因此这里必须实际试跑一次再采用。
+PY=""
+for candidate in python python3 py; do
+  if command -v "$candidate" >/dev/null 2>&1; then
+    if "$candidate" -c "import sys" >/dev/null 2>&1; then
+      PY="$candidate"
+      break
+    fi
+  fi
+done
+
+if [ -z "$PY" ]; then
+  echo "未找到可用的 python，跳过提交前检查。" >&2
+  echo "请手动执行：python scripts/check_secrets.py" >&2
+  exit 0
+fi
+
+exec "$PY" "$(git rev-parse --show-toplevel)/scripts/precommit_guard.py"
