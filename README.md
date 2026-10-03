@@ -52,6 +52,13 @@ max_withdrawable = max(0, min_{t∈T}(余额(t) − 留底))
 
 详细口径见 [`docs/enhancement-v2.md`](docs/enhancement-v2.md)。
 
+> **V3 起本系统没有「管理员」这一业务身份。**
+> 工 e 稳袋定位为上层银行 / 商户服务 App 中的一个业务模块，平台级用户管理与系统运维
+> 由上层系统承担：没有管理后台、没有 `/api/v1/admin/*` 接口、也没有运行状态面板。
+> 业务身份只有 **经营者 / 家庭成员 / 咨询人员** 三种，它们之间没有等级关系。
+> 详见 [`docs/architecture.md`](docs/architecture.md) 与
+> [`docs/v3-optimization.md`](docs/v3-optimization.md)。
+
 ---
 
 ## 2. 技术栈
@@ -93,7 +100,7 @@ gong-e-wendai/
 │   ├── e2e/                        # Playwright
 │   └── package.json
 ├── scripts/                        # init_db / seed_dev_data / build_production / backup_db / deploy.sh
-├── docs/                           # architecture / api / database / csv-format / deployment / security / acceptance-tests
+├── docs/                           # architecture / api / database / csv-format / deployment / security / acceptance-tests / mobile-design / v3-optimization
 ├── data/                           # 运行数据（不入 Git）
 └── uploads/                        # 上传文件（不入 Git）
 ```
@@ -194,8 +201,8 @@ cd D:\CodingData\Github\GongHangCup\gong-e-wendai\backend
 python -m pytest
 ```
 
-共 **492 项**，覆盖现金引擎、分析接口、现金事件、CSV 导入、家庭协同、
-经营咨询、权限、智能服务、增强模块、参考一致性。
+共 **484 项**，覆盖现金引擎、分析接口、现金事件、CSV 导入、家庭协同、
+经营咨询、业务身份边界与跨主体隔离、智能服务、增强模块、参考一致性。
 
 主回归算例（`backend/tests/fixtures_cash.py`）锁定产品口径：
 期初 3600 元、留底 600 元，进货款 −1400、结算款 +2000、房租 −1800、退款 −600。
@@ -216,10 +223,10 @@ python -m pytest
 
 ```powershell
 cd D:\CodingData\Github\GongHangCup\gong-e-wendai\frontend
-npm run test          # Vitest（27 项）
+npm run test          # Vitest（37 项）
 npm run lint          # ESLint（--max-warnings 0）
 npm run typecheck     # TypeScript strict
-npm run test:e2e      # Playwright（36 项，需先启动前后端）
+npm run test:e2e      # Playwright（39 项，需先启动前后端）
 ```
 
 端到端测试默认指向 `http://127.0.0.1:8000`（同源单端口生产形态），
@@ -230,9 +237,9 @@ $env:E2E_BASE_URL="https://ccqspace.site/wendai"
 npm run test:e2e
 ```
 
-咨询工作台界面用例需要管理员凭据，通过环境变量提供：
-`E2E_ADMIN_USERNAME` / `E2E_ADMIN_PASSWORD`；未提供时该用例跳过
-（服务端权限已由后端测试覆盖）。
+咨询工作台界面用例会通过 `scripts/provision_consultant.py` 现场开通一个咨询人员身份
+（与生产开通路径一致，不再依赖管理员凭据）。脚本需要 Python：
+默认使用 PATH 中的 `python`，可用 `E2E_PYTHON` 指定解释器。
 
 ### 5.3 提交前守卫（每个克隆执行一次）
 
