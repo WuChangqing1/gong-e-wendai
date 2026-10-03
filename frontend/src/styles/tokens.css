@@ -722,6 +722,19 @@ a:hover {
 }
 
 /* ---------------- 其他 ---------------- */
+.gew-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-5);
+}
+
+.gew-page-header__extra {
+  min-width: 0;
+}
+
 .gew-page-title {
   margin: 0 0 var(--space-2);
   font-size: 20px;
@@ -895,6 +908,36 @@ a:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ---------------- 抽屉与底部操作区 ---------------- */
+.gew-drawer__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
+@media (max-width: 767px) {
+  /* 手机端抽屉全屏，底部操作区跟随安全区，避免被底部导航遮挡 */
+  .gew-drawer--mobile .ant-drawer-body {
+    padding-bottom: var(--space-4);
+  }
+
+  .gew-drawer__footer {
+    justify-content: stretch;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .gew-drawer__footer > .ant-btn,
+  .gew-drawer__footer > .ant-space {
+    flex: 1 1 auto;
+  }
+
+  /* 重要提交按钮的可点击高度不低于 44px */
+  .gew-drawer__footer .ant-btn {
+    min-height: 44px;
+  }
 }
 
 /* ---------------- 移动端专项适配 ----------------

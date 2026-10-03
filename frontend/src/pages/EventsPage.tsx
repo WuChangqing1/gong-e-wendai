@@ -34,7 +34,7 @@ import {
 import { cashEventApi, type CashEventQuery } from '@/api/cashflow';
 import { errorMessage } from '@/api/client';
 import { queryKeys, queryClient } from '@/api/queryClient';
-import { MetricCard, PageHeader, SectionCard, StatusTag } from '@/components/ui';
+import { MetricCard, PageHeader, ResponsiveDataView, SectionCard, StatusTag } from '@/components/ui';
 import EventFormDrawer from '@/features/events/EventFormDrawer';
 import MobileEventList from '@/features/events/MobileEventList';
 import RevisionDrawer from '@/features/events/RevisionDrawer';
@@ -431,65 +431,68 @@ export default function EventsPage() {
           ) : null}
         </Space>
 
-        {isMobile ? (
-          <MobileEventList
-            items={listQuery.data?.items ?? []}
-            loading={listQuery.isLoading}
-            onCreate={() => {
-              setEditing(null);
-              setFormOpen(true);
-            }}
-            onImport={() => setImportOpen(true)}
-            onEdit={(record) => {
-              setEditing(record);
-              setFormOpen(true);
-            }}
-            onShowSource={(record) => setSourceId(record.id)}
-            onShowRevisions={(record) => setRevisionId(record.id)}
-            onCancel={(record) => cancelMutation.mutate(record.id)}
-          />
-        ) : (
-          <Table<CashEvent>
-          rowKey="id"
-          columns={columns}
-          dataSource={listQuery.data?.items ?? []}
-          loading={listQuery.isLoading}
-          size="middle"
-          scroll={{ x: 980 }}
-          locale={{
-            emptyText: (
-              <Empty
-                description="还没有收付款事项"
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-              >
-                <Space>
-                  <Button
-                    type="primary"
-                    icon={<PlusOutlined />}
-                    onClick={() => {
-                      setEditing(null);
-                      setFormOpen(true);
-                    }}
+        <ResponsiveDataView
+          mobileCards={
+            <MobileEventList
+              items={listQuery.data?.items ?? []}
+              loading={listQuery.isLoading}
+              onCreate={() => {
+                setEditing(null);
+                setFormOpen(true);
+              }}
+              onImport={() => setImportOpen(true)}
+              onEdit={(record) => {
+                setEditing(record);
+                setFormOpen(true);
+              }}
+              onShowSource={(record) => setSourceId(record.id)}
+              onShowRevisions={(record) => setRevisionId(record.id)}
+              onCancel={(record) => cancelMutation.mutate(record.id)}
+            />
+          }
+          desktopTable={
+            <Table<CashEvent>
+              rowKey="id"
+              columns={columns}
+              dataSource={listQuery.data?.items ?? []}
+              loading={listQuery.isLoading}
+              size="middle"
+              scroll={{ x: 980 }}
+              locale={{
+                emptyText: (
+                  <Empty
+                    description="还没有收付款事项"
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
                   >
-                    新增事项
-                  </Button>
-                  <Button icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>
-                    导入 CSV
-                  </Button>
-                </Space>
-              </Empty>
-            ),
-          }}
-          pagination={{
-            current: listQuery.data?.meta.page ?? 1,
-            pageSize: PAGE_SIZE,
-            total: listQuery.data?.meta.total ?? 0,
-            showSizeChanger: false,
-            onChange: setPage,
-            showTotal: (total) => `共 ${total} 条`,
-          }}
+                    <Space>
+                      <Button
+                        type="primary"
+                        icon={<PlusOutlined />}
+                        onClick={() => {
+                          setEditing(null);
+                          setFormOpen(true);
+                        }}
+                      >
+                        新增事项
+                      </Button>
+                      <Button icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>
+                        导入 CSV
+                      </Button>
+                    </Space>
+                  </Empty>
+                ),
+              }}
+              pagination={{
+                current: listQuery.data?.meta.page ?? 1,
+                pageSize: PAGE_SIZE,
+                total: listQuery.data?.meta.total ?? 0,
+                showSizeChanger: false,
+                onChange: setPage,
+                showTotal: (total) => `共 ${total} 条`,
+              }}
+            />
+          }
         />
-        )}
 
         {isMobile && (!listQuery.data || listQuery.data.meta.total > PAGE_SIZE) ? (
           <Pagination

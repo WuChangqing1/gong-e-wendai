@@ -1,0 +1,16 @@
+refactor: establish responsive application framework
+
+统一全项目断点语义，消除三套并存的口径（CSS 767px、Ant Design Sider breakpoint lg、
+Zustand isMobile）。
+
+- hooks/useResponsive.ts 成为唯一边界来源：mobile<=767 / tablet 768-1023 / desktop>=1024，
+  由 window.matchMedia + useSyncExternalStore 驱动（跨断点才重渲染，不会重复请求接口）
+- 新增 ResponsiveDataView：桌面渲染表格、手机渲染卡片列表
+- 新增 ResponsiveDrawer：桌面设计宽度、手机 100vw + 底部固定操作区（>=44px、safe-area）
+- AppLayout 断点改由 useResponsive 提供，移除 Sider onBreakpoint 与 store.isMobile
+- PageHeader 结构类化（.gew-page-header），为手机端隐藏重复标题做准备
+- tests/setup.ts 换成可求值的 matchMedia 桩，并支持 setViewportWidth 切换视口
+- 新增 tests/responsive.test.tsx：断点判定、ResponsiveDataView 三种视口、
+  以及「导航不存在系统管理入口」的回归
+
+前端 37 项（含新增 10 项）、E2E 38 通过 1 跳过。

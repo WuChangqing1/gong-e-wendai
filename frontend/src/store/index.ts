@@ -49,9 +49,6 @@ export function hasPermission(user: UserMe | null, permission: string): boolean 
 export interface UiState {
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
-  /** 当前是否为窄屏（由布局断点写入） */
-  isMobile: boolean;
-  setIsMobile: (value: boolean) => void;
   lastStaleNoticeId: string | null;
   setLastStaleNoticeId: (id: string | null) => void;
 }
@@ -59,8 +56,6 @@ export interface UiState {
 export const useUiStore = create<UiState>()((set) => ({
   sidebarCollapsed: false,
   toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
-  isMobile: false,
-  setIsMobile: (value) => set({ isMobile: value }),
   lastStaleNoticeId: null,
   setLastStaleNoticeId: (id) => set({ lastStaleNoticeId: id }),
 }));
