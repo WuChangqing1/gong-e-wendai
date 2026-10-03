@@ -517,6 +517,11 @@ class EnhancementService:
                 diagnostics={**result.diagnostics, "blocks_error": blocks_error},
                 source_refs=list(result.source_refs),
                 disclosure=result.disclosure,
+                # blocks 里可能是 ForecastUnavailable（没有 disclosure 字段），
+                # 因此用 getattr 兜底，避免为了拿一句口径说明而 500。
+                validation_disclosure=(
+                    str(getattr(blocks[0], "disclosure", "")) if blocks else ""
+                ),
                 forecast_affects_withdrawable=False,
             ),
             blocks,

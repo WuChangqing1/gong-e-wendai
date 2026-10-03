@@ -192,6 +192,9 @@ class ForecastOut(BaseModel):
     diagnostics: dict = Field(default_factory=dict)
     source_refs: list[str] = Field(default_factory=list)
     disclosure: str = ""
+    #: 校验口径说明（滚动窗口重叠、非独立样本等）。
+    #: 属于技术细节，前端只在「查看计算依据」里展示，不占主视觉。
+    validation_disclosure: str = ""
     #: 恒定 false：历史参考永远不会影响今天可提用金额
     forecast_affects_withdrawable: bool = False
 
