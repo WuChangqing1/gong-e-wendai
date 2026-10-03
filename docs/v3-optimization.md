@@ -2,9 +2,11 @@
 
 本文记录 V3 优化在本地分支上的实施内容、验证结果与尚未完成的部分。
 
-- 分支：`feat/wendai-v3-optimization`
+- 分支：`feat/wendai-v3-optimization`（已推送）
+- 合并点：`bf8a44a`（`main`，已推送 origin）
+- 发布 Tag：`v3-optimization-20261003`
 - 基线：`docs/v3-baseline.md`（`5ef53ef`，安全 Tag `pre-v3-optimization-20261003`）
-- 状态：**本地全部完成并通过测试；生产部署与公网验收尚未执行**
+- 状态：**代码已完成、测试全绿并推送到 GitHub Private；生产部署尚未执行**
 
 ---
 
@@ -158,8 +160,8 @@ Windows 的**机器级**环境变量位于
 | 项目 | 说明 |
 | --- | --- |
 | 生产部署 | 未执行。需备份生产库与 Nginx 配置后再拉取、迁移、重启 |
-| 公网验收 | 未执行。`https://ccqspace.site/wendai/` 仍运行旧版本 |
-| 真机验收 | 未在真实手机浏览器上核对（仅用视口模拟） |
+| 公网验收（自动化） | 未执行。服务器无 GitHub 凭据，部署走 bundle 方式 |
+| 真机验收 | **用户已确认**：手机访问 `https://ccqspace.site/wendai/today` 正常 |
 | 本地 AI 开启 | 本机 `.env` 保持 `AI_ENABLED=false`，避免日常调试消耗额度；密钥连通性已单独验证 |
 | 情景对比明细 | 手机端仍为表格（列数少、本身是对比矩阵），保留容器内横向滚动 + 遮罩提示 |
 | 剩余首屏体积 | 非图表页面已降至 1630 KB（gzip 533 KB），其中 antd 占约 1307 KB，是当前唯一的大头；进一步下降需要替换重组件（如 DatePicker）或整体换 UI 库，不属于本次范围 |
