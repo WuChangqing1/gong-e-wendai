@@ -1,6 +1,12 @@
 /** 全局领域类型定义。 */
 
-export type Role = 'merchant' | 'family_member' | 'consultant' | 'admin';
+/**
+ * 业务身份。
+ *
+ * 三者之间**没有等级关系**：工 e 稳袋是上层银行 / 商户服务 App 中的一个业务模块，
+ * 平台级用户与运维管理由上层系统承担，因此本系统不存在 admin 身份。
+ */
+export type Role = 'merchant' | 'family_member' | 'consultant';
 
 export type Direction = 'inflow' | 'outflow';
 export type CashEventState = 'scheduled' | 'included_in_opening' | 'cancelled';

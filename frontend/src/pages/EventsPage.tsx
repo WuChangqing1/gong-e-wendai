@@ -9,6 +9,7 @@ import {
   DatePicker,
   Empty,
   Input,
+  Pagination,
   Popconfirm,
   Select,
   Space,
@@ -21,6 +22,7 @@ import type { ColumnsType } from 'antd/es/table';
 import {
   EditOutlined,
   FileSearchOutlined,
+  FilterOutlined,
   HistoryOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -34,11 +36,13 @@ import { errorMessage } from '@/api/client';
 import { queryKeys, queryClient } from '@/api/queryClient';
 import { MetricCard, PageHeader, SectionCard, StatusTag } from '@/components/ui';
 import EventFormDrawer from '@/features/events/EventFormDrawer';
+import MobileEventList from '@/features/events/MobileEventList';
 import RevisionDrawer from '@/features/events/RevisionDrawer';
 import SourceDrawer from '@/features/events/SourceDrawer';
 import SmartInputDrawer from '@/features/ai/SmartInputDrawer';
 import ImportDrawer from '@/features/import/ImportDrawer';
 import { HistoryPane, SettlementPane } from '@/features/enhancement/HistoryPanes';
+import { useIsMobile } from '@/hooks/useResponsive';
 import type { CashEvent, Direction } from '@/types';
 import { formatCny, formatSigned } from '@/utils/money';
 import { formatDateTime } from '@/utils/datetime';
@@ -55,6 +59,8 @@ export default function EventsPage() {
   const { message } = AntdApp.useApp();
   const queryClientInstance = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
+  const isMobile = useIsMobile();
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -77,6 +83,14 @@ export default function EventsPage() {
       setSourceId(focusId);
     }
   }, [focusId]);
+
+  /** 手机端折叠筛选时，用来提示「当前有几项筛选条件生效」，避免用户在无结果时找不到原因。 */
+  const activeFilterCount =
+    (search ? 1 : 0) +
+    (direction ? 1 : 0) +
+    (state ? 1 : 0) +
+    (eventType ? 1 : 0) +
+    (range ? 1 : 0);
 
   const params: CashEventQuery = useMemo(
     () => ({
@@ -326,82 +340,116 @@ export default function EventsPage() {
           </Tooltip>
         }
       >
-        <Space wrap style={{ marginBottom: 16 }}>
-          <Input.Search
-            allowClear
-            placeholder="搜索事项名称、编号、备注"
-            style={{ width: 240 }}
-            onSearch={(value) => {
-              setSearch(value);
-              setPage(1);
-            }}
-          />
-          <Select
-            allowClear
-            placeholder="收支方向"
-            style={{ width: 130 }}
-            value={direction}
-            onChange={(value) => {
-              setDirection(value);
-              setPage(1);
-            }}
-            options={[
-              { value: 'inflow', label: '收入' },
-              { value: 'outflow', label: '支出' },
-            ]}
-          />
-          <Select
-            allowClear
-            placeholder="状态"
-            style={{ width: 150 }}
-            value={state}
-            onChange={(value) => {
-              setState(value);
-              setPage(1);
-            }}
-            options={[
-              { value: 'scheduled', label: '计划中' },
-              { value: 'included_in_opening', label: '已计入期初' },
-              { value: 'cancelled', label: '已取消' },
-            ]}
-          />
-          <Select
-            allowClear
-            placeholder="事项类型"
-            style={{ width: 150 }}
-            value={eventType}
-            onChange={(value) => {
-              setEventType(value);
-              setPage(1);
-            }}
-            options={Object.entries(EVENT_TYPE_LABELS).map(([value, label]) => ({ value, label }))}
-          />
-          <DatePicker.RangePicker
-            showTime={{ format: 'HH:mm' }}
-            onChange={(values) => {
-              if (values && values[0] && values[1]) {
-                setRange([values[0].toISOString(), values[1].toISOString()]);
-              } else {
-                setRange(null);
-              }
-              setPage(1);
-            }}
-          />
-          <Button
-            onClick={() => {
-              setSearch('');
-              setDirection(undefined);
-              setState(undefined);
-              setEventType(undefined);
-              setRange(null);
-              setPage(1);
-            }}
-          >
-            重置
-          </Button>
+        <Space wrap style={{ marginBottom: isMobile && !filtersOpen ? 12 : 16 }}>
+          {isMobile ? (
+            <Button
+              icon={<FilterOutlined />}
+              onClick={() => setFiltersOpen((value) => !value)}
+              aria-expanded={filtersOpen}
+              type={activeFilterCount > 0 ? 'primary' : 'default'}
+              ghost={activeFilterCount > 0}
+            >
+              筛选{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
+            </Button>
+          ) : null}
+          {!isMobile || filtersOpen ? (
+            <>
+              <Input.Search
+                allowClear
+                placeholder="搜索事项名称、编号、备注"
+                style={{ width: isMobile ? '100%' : 240 }}
+                onSearch={(value) => {
+                  setSearch(value);
+                  setPage(1);
+                }}
+              />
+              <Select
+                allowClear
+                placeholder="收支方向"
+                style={{ width: isMobile ? 100 : 130 }}
+                value={direction}
+                onChange={(value) => {
+                  setDirection(value);
+                  setPage(1);
+                }}
+                options={[
+                  { value: 'inflow', label: '收入' },
+                  { value: 'outflow', label: '支出' },
+                ]}
+              />
+              <Select
+                allowClear
+                placeholder="状态"
+                style={{ width: isMobile ? 100 : 150 }}
+                value={state}
+                onChange={(value) => {
+                  setState(value);
+                  setPage(1);
+                }}
+                options={[
+                  { value: 'scheduled', label: '计划中' },
+                  { value: 'included_in_opening', label: '已计入期初' },
+                  { value: 'cancelled', label: '已取消' },
+                ]}
+              />
+              <Select
+                allowClear
+                placeholder="事项类型"
+                style={{ width: isMobile ? 110 : 150 }}
+                value={eventType}
+                onChange={(value) => {
+                  setEventType(value);
+                  setPage(1);
+                }}
+                options={Object.entries(EVENT_TYPE_LABELS).map(([value, label]) => ({ value, label }))}
+              />
+              <DatePicker.RangePicker
+                showTime={{ format: 'HH:mm' }}
+                style={{ width: isMobile ? '100%' : undefined }}
+                onChange={(values) => {
+                  if (values && values[0] && values[1]) {
+                    setRange([values[0].toISOString(), values[1].toISOString()]);
+                  } else {
+                    setRange(null);
+                  }
+                  setPage(1);
+                }}
+              />
+              <Button
+                onClick={() => {
+                  setSearch('');
+                  setDirection(undefined);
+                  setState(undefined);
+                  setEventType(undefined);
+                  setRange(null);
+                  setPage(1);
+                }}
+              >
+                重置
+              </Button>
+            </>
+          ) : null}
         </Space>
 
-        <Table<CashEvent>
+        {isMobile ? (
+          <MobileEventList
+            items={listQuery.data?.items ?? []}
+            loading={listQuery.isLoading}
+            onCreate={() => {
+              setEditing(null);
+              setFormOpen(true);
+            }}
+            onImport={() => setImportOpen(true)}
+            onEdit={(record) => {
+              setEditing(record);
+              setFormOpen(true);
+            }}
+            onShowSource={(record) => setSourceId(record.id)}
+            onShowRevisions={(record) => setRevisionId(record.id)}
+            onCancel={(record) => cancelMutation.mutate(record.id)}
+          />
+        ) : (
+          <Table<CashEvent>
           rowKey="id"
           columns={columns}
           dataSource={listQuery.data?.items ?? []}
@@ -441,6 +489,20 @@ export default function EventsPage() {
             showTotal: (total) => `共 ${total} 条`,
           }}
         />
+        )}
+
+        {isMobile && (!listQuery.data || listQuery.data.meta.total > PAGE_SIZE) ? (
+          <Pagination
+            size="small"
+            style={{ marginTop: 16, textAlign: 'center' }}
+            current={listQuery.data?.meta.page ?? 1}
+            pageSize={PAGE_SIZE}
+            total={listQuery.data?.meta.total ?? 0}
+            showSizeChanger={false}
+            onChange={setPage}
+            showTotal={(total) => `共 ${total} 条`}
+          />
+        ) : null}
       </SectionCard>
         </>
       )}

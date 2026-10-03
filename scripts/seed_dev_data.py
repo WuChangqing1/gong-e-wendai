@@ -9,7 +9,9 @@
 | `merchant_demo` | merchant | 经营主体，已登记资金时点与三笔未来事项 |
 | `family_demo` | family_member | 家庭成员，已通过家庭审核 |
 | `consultant_demo` | consultant | 咨询人员 |
-| `admin_demo` | admin | 管理员 |
+
+> 本系统只有 merchant / family_member / consultant 三种业务身份，
+> **不存在 admin**。咨询人员的正式开通走 ``scripts/provision_consultant.py``。
 
 用法::
 
@@ -41,7 +43,7 @@ def main() -> int:
     from app.core.security import hash_password  # noqa: PLC0415
     from app.models.household import Household, HouseholdMembership  # noqa: PLC0415
     from app.models.merchant import BusinessAccountSnapshot, MerchantProfile  # noqa: PLC0415
-    from app.models.user import ROLE_ADMIN, ROLE_CONSULTANT, ROLE_FAMILY_MEMBER, ROLE_MERCHANT, User, UserRole  # noqa: PLC0415
+    from app.models.user import ROLE_CONSULTANT, ROLE_FAMILY_MEMBER, ROLE_MERCHANT, User, UserRole  # noqa: PLC0415
     from app.schemas.cash_event import CashEventCreate  # noqa: PLC0415
     from app.services.event_service import CashEventService  # noqa: PLC0415
     from app.utils.timeutil import utcnow  # noqa: PLC0415
@@ -67,7 +69,6 @@ def main() -> int:
         merchant_user = make_user("merchant_demo", "王掌柜", [ROLE_MERCHANT])
         family_user = make_user("family_demo", "王太太", [ROLE_FAMILY_MEMBER])
         consultant_user = make_user("consultant_demo", "咨询小李", [ROLE_CONSULTANT])
-        admin_user = make_user("admin_demo", "系统管理员", [ROLE_ADMIN])
 
         profile = MerchantProfile(
             user_id=merchant_user.id,
@@ -157,9 +158,8 @@ def main() -> int:
         print(f"  经营主体   merchant_demo   / {PASSWORD}")
         print(f"  家庭成员   family_demo     / {PASSWORD}   （已加入家庭，邀请码 DEVDEMO1）")
         print(f"  咨询人员   consultant_demo / {PASSWORD}")
-        print(f"  管理员     admin_demo      / {PASSWORD}")
         print(f"  数据库     {settings.database_path or settings.database_url}")
-        _ = (consultant_user, admin_user)
+        _ = consultant_user
         return 0
     finally:
         db.close()

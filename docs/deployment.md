@@ -167,17 +167,20 @@ set -a; . ../.env.production; set +a
 
 生产首次启动只运行迁移，**不会**生成任何账户或种子数据。
 
-管理员账户按需创建（密码随机生成、写入 `0600` 文件、不打印到终端）：
+咨询人员身份按需开通（密码随机生成、写入 `0600` 文件、不打印到终端）：
 
 ```bash
 cd ~/apps/gong-e-wendai/backend
-../.venv/bin/python ../scripts/provision_admin.py --username xitongguanli --name 系统管理员
-# 输出：已创建独立管理员账户 xitongguanli
-#      凭据已写入 /home/ubuntu/admin-credentials.txt（权限 600），未打印到终端
+../.venv/bin/python ../scripts/provision_consultant.py --username zixunxiaoli --name 咨询小李
+# 输出：✓ 咨询人员账户已创建：zixunxiaoli
+#      凭据已写入 /home/ubuntu/consultant-credentials.txt（权限 600），未打印到终端
 ```
 
-登录后立即修改密码，然后删除该凭据文件。**不要**给经营者账号附加 admin 角色：
-管理员必须是彼此独立的账户。
+登录后立即修改密码，然后删除该凭据文件。
+
+> V3 起本系统**没有 admin 身份**，也没有管理员后台：平台级用户管理与运维由上层
+> 银行 / 商户服务 App 承担。运维只通过 `systemctl --user status gong-e-wendai`、
+> `journalctl --user -u gong-e-wendai` 与 `GET /api/v1/health` 观察。
 
 ## 7. 一键部署
 

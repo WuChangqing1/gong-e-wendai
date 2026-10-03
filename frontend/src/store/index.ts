@@ -34,7 +34,7 @@ export const useAuthStore = create<AuthState>()(
 
 export function primaryRole(user: UserMe | null): Role | null {
   if (!user || user.roles.length === 0) return null;
-  const order: Role[] = ['merchant', 'consultant', 'admin', 'family_member'];
+  const order: Role[] = ['merchant', 'consultant', 'family_member'];
   return order.find((role) => user.roles.includes(role)) ?? user.roles[0];
 }
 

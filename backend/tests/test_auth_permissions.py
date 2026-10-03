@@ -51,10 +51,11 @@ class TestRegister:
         response = register(client, username="role_user", roles=["superuser"])
         assert response.status_code == 422
 
-    def test_register_rejects_self_service_admin(self, client: TestClient):
+    def test_register_rejects_removed_admin_role(self, client: TestClient):
+        """V3：admin 不再是合法业务身份，注册直接被拒。"""
         response = register(client, username="admin_user", roles=["admin"])
         assert response.status_code == 422
-        assert "管理员" in response.text
+        assert "不支持的业务角色" in response.text
 
     def test_register_multi_role(self, client: TestClient):
         response = register(
@@ -184,7 +185,7 @@ class TestOwnership:
         assert client.get("/api/v1/merchant/profile").status_code == 403
         assert client.get("/api/v1/account/overview").status_code == 403
 
-    def test_admin_registration_disabled(self, client: TestClient):
+    def test_removed_admin_role_cannot_register(self, client: TestClient):
         response = register(client, username="wannabe_admin", roles=["admin"])
         assert response.status_code == 422
 

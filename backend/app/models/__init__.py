@@ -65,7 +65,6 @@ from app.models.merchant import (
 )
 from app.models.user import (
     ALL_ROLES,
-    ROLE_ADMIN,
     ROLE_CONSULTANT,
     ROLE_FAMILY_MEMBER,
     ROLE_MERCHANT,
@@ -116,7 +115,6 @@ __all__ = [
     "QUESTION_TYPE_LABELS",
     "REACTION_TYPES",
     "RESERVE_MIN_BLOCKS",
-    "ROLE_ADMIN",
     "ROLE_CONSULTANT",
     "ROLE_FAMILY_MEMBER",
     "ROLE_MERCHANT",

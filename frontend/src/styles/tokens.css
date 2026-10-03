@@ -212,6 +212,35 @@ a:hover {
   }
 }
 
+/* 宽表在手机端需要横滑时给出可见提示与渐隐遮罩，避免用户以为内容被截断 */
+.gew-scroll-hint {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .gew-table-scroll {
+    position: relative;
+  }
+
+  .gew-table-scroll::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 24px;
+    background: linear-gradient(to right, rgba(255, 255, 255, 0), var(--surface));
+    pointer-events: none;
+  }
+
+  .gew-scroll-hint {
+    display: block;
+    padding: 0 var(--space-4) var(--space-3);
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+}
+
 /* 移动端底部导航 */
 .gew-tabbar {
   display: none;
@@ -782,6 +811,186 @@ a:hover {
   margin: 0;
   max-height: 260px;
   overflow: auto;
+}
+
+/* ---------------- 手机端事项卡片列表 ----------------
+   替代桌面端 980px 宽表格，横向不再需要拖动。 */
+.gew-event-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.gew-event-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gew-event-card__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.gew-event-card__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 0;
+  word-break: break-word;
+}
+
+.gew-event-card__version {
+  font-size: 12px;
+  color: var(--text-muted);
+  align-self: center;
+}
+
+.gew-event-card__meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.gew-event-card__amounts {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.gew-event-card__time {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.gew-event-card__amounts .num:last-child {
+  margin-left: auto;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.gew-event-card__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  border-top: 1px dashed var(--divider);
+  padding-top: 4px;
+}
+
+.gew-event-card__source {
+  font-size: 12px;
+  color: var(--text-secondary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------------- 移动端专项适配 ----------------
+   断点 767px 与 hooks/useResponsive.ts 的 MOBILE_MAX 必须一致。
+   这里只处理纯样式差异；需要改变组件结构或图表配置的，走 useIsMobile()。 */
+
+/* 手机上隐藏页头重复标题，只保留副标题；
+   H1 仍留在 DOM 中供屏幕阅读器与自动化用例定位，不影响语义与可检索性。 */
+@media (max-width: 767px) {
+  .gew-page-title {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .gew-page-subtitle {
+    margin-bottom: var(--space-3);
+  }
+
+  /* 页头标题与页面标题重复：窄屏顶部改为「品牌 + 当前导航项」，与底部导航形成呼应 */
+  .gew-header__title {
+    display: none;
+  }
+
+  .gew-header::before {
+    content: '';
+    display: block;
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    background: var(--brand-red);
+    flex: 0 0 auto;
+  }
+
+  .gew-header__meta {
+    gap: var(--space-2);
+  }
+
+  /* 「我的」等页面的页签在窄屏改为横向滑动；
+     隐藏 Ant Design 的溢出折叠菜单，避免「智能服务」被折进 ... 里点不到。 */
+  .ant-tabs-nav-wrap {
+    overflow-x: auto !important;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  .ant-tabs-nav-wrap::-webkit-scrollbar {
+    display: none;
+  }
+
+  .ant-tabs-nav-list {
+    flex-wrap: nowrap;
+  }
+
+  .ant-tabs-tab {
+    flex: 0 0 auto;
+  }
+
+  .ant-tabs-nav-more {
+    display: none !important;
+  }
+
+  /* iOS Safari 在字体小于 16px 的输入框聚焦时会自动放大整页，
+     导致「手机端显示很怪」。表单控件统一 16px 以关闭该行为。 */
+  .gew-content input.ant-input,
+  .gew-content input.ant-input-affix-wrapper > input,
+  .gew-content textarea.ant-input,
+  .gew-content .ant-input-number-input,
+  .gew-content .ant-select-selection-search-input,
+  .gew-content .ant-picker input {
+    font-size: 16px;
+  }
+
+  /* 底部导航：保证触控区高度与标签完整性 */
+  .gew-tabbar {
+    height: auto;
+    min-height: var(--mobile-tabbar-height);
+  }
+
+  .gew-tabbar__item {
+    padding: 6px 2px;
+    font-size: 12px;
+    line-height: 1.2;
+    word-break: keep-all;
+    gap: 3px;
+  }
+
+  .gew-tabbar__icon {
+    font-size: 19px;
+  }
 }
 
 /* 无障碍：焦点可见 */

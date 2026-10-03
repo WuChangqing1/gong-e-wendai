@@ -15,7 +15,16 @@
 
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 export const PASSWORD = 'Wendai2025';
+
+/** 本文件所在目录（ESM 下没有 __dirname）。 */
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 /** 应用基路径，例如 '' 或 '/wendai'。 */
 export function appBase(): string {
@@ -208,13 +217,62 @@ export async function createMerchantFixture(
 }
 
 /** 通过界面登录（验证真实登录表单）。 */
-export async function loginViaUi(page: Page, username: string): Promise<void> {
+export async function loginViaUi(
+  page: Page,
+  username: string,
+  password: string = PASSWORD,
+): Promise<void> {
   await page.goto(appUrl('/login'));
   const form = page.locator('.gew-auth__form-inner');
   await form.getByLabel('账户').fill(username);
-  await form.getByLabel('密码').fill(PASSWORD);
+  await form.getByLabel('密码').fill(password);
   await btn(form, '登录').click();
-  await expect(page).toHaveURL(/\/(today|consultant|admin|family)/, { timeout: 25_000 });
+  await expect(page).toHaveURL(/\/(today|consultant|family)/, { timeout: 25_000 });
+}
+
+/**
+ * 开通一个咨询人员身份。
+ *
+ * V3 起本系统没有管理员后台，咨询人员属于上层系统的身份，只能由
+ * ``scripts/provision_consultant.py`` 开通（与生产开通路径一致）。
+ *
+ * 脚本会随机生成密码并写入 0600 凭据文件，这里读回密码用于界面登录；
+ * **密码只在本进程内存中流转，不打印、不写入测试产物**。
+ */
+export function provisionConsultant(username: string, displayName = '咨询小李'): {
+  username: string;
+  password: string;
+} {
+  const repoRoot = resolve(HERE, '..', '..');
+  const python = process.env.E2E_PYTHON || 'python';
+  const workDir = mkdtempSync(join(tmpdir(), 'gew-consultant-'));
+  const credPath = join(workDir, 'credentials.txt');
+  try {
+    execFileSync(
+      python,
+      [
+        join(repoRoot, 'scripts', 'provision_consultant.py'),
+        '--username',
+        username,
+        '--name',
+        displayName,
+        '--out',
+        credPath,
+      ],
+      { cwd: repoRoot, encoding: 'utf8', stdio: 'pipe' },
+    );
+    if (!credPath || !existsSync(credPath)) {
+      throw new Error('咨询人员凭据文件未生成，无法继续');
+    }
+    const content = readFileSync(credPath, 'utf8');
+    const password = content.match(/^password=(.+)$/m)?.[1]?.trim();
+    if (!password) {
+      throw new Error('咨询人员凭据文件缺少密码字段');
+    }
+    return { username, password };
+  } finally {
+    rmSync(workDir, { recursive: true, force: true });
+  }
 }
 
 /** 通过界面注册（验证真实注册表单）。 */

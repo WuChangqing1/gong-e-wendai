@@ -12,6 +12,7 @@ import {
   createMerchantFixture,
   gotoAuthed,
   loginViaUi,
+  provisionConsultant,
   uniqueName,
 } from './helpers';
 
@@ -102,15 +103,8 @@ test.describe('经营咨询', () => {
   });
 
   test('咨询人员受理核实，且无法访问经营数据', async ({ page, request }) => {
-    // 咨询人员不能自助注册：必须由管理员开通。
-    // 凭据只从环境变量读取，绝不硬编码在测试里。
-    const adminUsername = process.env.E2E_ADMIN_USERNAME;
-    const adminPassword = process.env.E2E_ADMIN_PASSWORD;
-    test.skip(
-      !adminUsername || !adminPassword,
-      '未提供 E2E_ADMIN_USERNAME / E2E_ADMIN_PASSWORD，跳过咨询工作台界面验收（服务端权限已由后端测试覆盖）',
-    );
-
+    // 咨询人员不能自助注册，也没有管理员后台可以开通。
+    // V3 起统一走与生产一致的开通脚本：scripts/provision_consultant.py。
     const fixture = await createMerchantFixture(request, 'consultflow');
     const merchantContext = request;
     const loginResponse = await merchantContext.post(apiUrl('auth', 'login'), {
@@ -129,26 +123,9 @@ test.describe('经营咨询', () => {
     });
     expect(caseResponse.status(), await caseResponse.text()).toBe(201);
 
-    // 管理员登录后开通咨询人员账户
-    const adminLogin = await request.post(apiUrl('auth', 'login'), {
-      headers: { 'X-Requested-With': 'XMLHttpRequest' },
-      data: { username: adminUsername, password: adminPassword },
-    });
-    expect(adminLogin.status(), await adminLogin.text()).toBe(200);
+    const consultant = provisionConsultant(uniqueName('consultant'));
 
-    const consultantName = uniqueName('consultant');
-    const consultantCreate = await request.post(apiUrl('admin', 'users'), {
-      headers: { 'X-Requested-With': 'XMLHttpRequest' },
-      data: {
-        username: consultantName,
-        password: PASSWORD,
-        display_name: '咨询小李',
-        roles: ['consultant'],
-      },
-    });
-    expect(consultantCreate.status(), await consultantCreate.text()).toBe(201);
-
-    await loginViaUi(page, consultantName);
+    await loginViaUi(page, consultant.username, consultant.password);
     await expect(page).toHaveURL(/\/consultant/, { timeout: 25_000 });
     await expect(page.getByRole('heading', { name: '咨询工作台' })).toBeVisible();
     await btn(page, '查看详情').first().click();

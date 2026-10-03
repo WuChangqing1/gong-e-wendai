@@ -123,9 +123,9 @@ def provision_user(
 ) -> None:
     """直接写入一个指定角色的账户。
 
-    公开注册只允许 ``merchant`` 与 ``family_member``；咨询人员与管理员必须由
-    管理员创建或由安全脚本创建。测试要模拟「管理员已经开通好这个账户」，
-    因此这里直接在数据库层创建，等价于 ``scripts/provision_admin.py`` 的路径。
+    公开注册只允许 ``merchant`` 与 ``family_member``；咨询人员属于上层系统的
+    身份，由安全脚本 ``scripts/provision_consultant.py`` 开通。测试要模拟
+    「上层身份已经开通好这个账户」，因此这里直接在数据库层创建。
     """
     from app.core.database import SessionLocal
     from app.core.security import hash_password as _hash
@@ -153,7 +153,7 @@ def provision_user(
 def consultant_client(app):
     """已登录的咨询人员客户端。
 
-    咨询人员不能自助注册，因此这里按「管理员已开通」的方式创建账户。
+    咨询人员不能自助注册，因此这里按「上层身份已开通」的方式创建账户。
     """
     provision_user(
         username="consultant_a", roles=["consultant"], display_name="咨询小李"

@@ -140,12 +140,19 @@ test.describe('响应式与移动端', () => {
     await expect(page.locator('.gew-auth__form-inner')).toBeVisible();
   });
 
-  test('窄屏下表格容器内部滚动而不撑破页面', async ({ page, request }) => {
+  test('窄屏下事项列表改为卡片且不撑破页面', async ({ page, request }) => {
     const fixture = await createMerchantFixture(request, 'mobiletable');
     await loginViaUi(page, fixture.user.username);
     await clickInBrowser(page.locator('.gew-tabbar'), '现金事件');
     await expect(page.getByRole('heading', { name: '现金事件' })).toBeVisible({ timeout: 25_000 });
-    await expect(page.getByRole('cell', { name: /结算款/ })).toBeVisible({ timeout: 25_000 });
+
+    // V3：手机端不再渲染 980px 宽表格，改为卡片列表（无需横向拖动）。
+    const cardList = page.getByTestId('event-card-list');
+    await expect(cardList).toBeVisible({ timeout: 25_000 });
+    await expect(cardList).toContainText('结算款');
+    // 卡片里必须带金额与操作入口，信息量与表格列一致
+    await expect(cardList).toContainText('¥');
+    await expect(page.locator('.ant-table-wrapper')).toBeHidden();
 
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,

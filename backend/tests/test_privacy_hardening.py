@@ -25,7 +25,8 @@ class TestSelfRegistrationRoles:
         assert response.status_code == 422
         assert "self_consult" not in response.text
 
-    def test_admin_cannot_self_register(self, client: TestClient):
+    def test_admin_role_no_longer_exists(self, client: TestClient):
+        """V3：本系统不存在 admin 业务身份，注册 admin 一律被拒。"""
         response = client.post(
             "/api/v1/auth/register",
             json={
@@ -302,15 +303,41 @@ class TestConsultationWhitelist:
 
 
 # ---------------------------------------------------------------------------
-# 商户不能进入管理接口
+# Admin 产品模块已被移除（V3）
 # ---------------------------------------------------------------------------
-class TestMerchantCannotUseAdminApi:
-    def test_merchant_gets_403_on_admin_endpoints(self, merchant_client: TestClient):
+class TestAdminModuleRemoved:
+    """V3 要求：不存在管理员等级，也不存在 /admin 业务 API。
+
+    这些路径必须表现为「接口不存在」（404），而不是「无权限」（403）——
+    后者意味着后台仍然存在，只是被拦住了。
+    """
+
+    ADMIN_PATHS = (
+        "/api/v1/admin/overview",
+        "/api/v1/admin/runtime",
+        "/api/v1/admin/users",
+        "/api/v1/admin/audit-logs",
+    )
+
+    def test_merchant_sees_admin_api_as_not_found(self, merchant_client: TestClient):
         api_fx.setup_merchant(merchant_client)
-        for path in (
-            "/api/v1/admin/overview",
-            "/api/v1/admin/runtime",
-            "/api/v1/admin/users",
-            "/api/v1/admin/audit-logs",
-        ):
-            assert merchant_client.get(path).status_code == 403, path
+        for path in self.ADMIN_PATHS:
+            assert merchant_client.get(path).status_code == 404, path
+
+    def test_consultant_sees_admin_api_as_not_found(self, consultant_client: TestClient):
+        for path in self.ADMIN_PATHS:
+            assert consultant_client.get(path).status_code == 404, path
+
+    def test_anonymous_sees_admin_api_as_not_found(self, client: TestClient):
+        for path in self.ADMIN_PATHS:
+            assert client.get(path).status_code == 404, path
+
+    def test_admin_path_is_absent_from_openapi(self, client: TestClient):
+        schema = client.get("/api/openapi.json").json()
+        assert not [path for path in schema["paths"] if path.startswith("/api/v1/admin")]
+
+    def test_role_registry_has_no_admin(self, client: TestClient):
+        from app.models.user import ALL_ROLES
+
+        assert "admin" not in ALL_ROLES
+        assert set(ALL_ROLES) == {"merchant", "family_member", "consultant"}

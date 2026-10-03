@@ -14,7 +14,6 @@ export const ROLE_LABELS: Record<Role, string> = {
   merchant: '经营者',
   family_member: '家庭成员',
   consultant: '咨询人员',
-  admin: '管理员',
 };
 
 export const DIRECTION_LABELS: Record<Direction, string> = {

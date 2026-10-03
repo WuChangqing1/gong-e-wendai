@@ -1,15 +1,14 @@
 """在目标环境创建一套固定的演示账号（幂等，可重复执行）。
 
 **仅限演示 / 开发环境。** 本脚本会创建固定密码的账号，因此在生产运行时
-（``APP_ENV=production``）会被直接拒绝。生产管理员必须通过
-``scripts/provision_admin.py`` 创建，密码由脚本随机生成且不打印到终端。
+（``APP_ENV=production``）会被直接拒绝。
 
 用法::
 
     PYTHONPATH=backend python scripts/setup_demo_accounts.py
 
 账号（密码统一 Wendai2025）：
-* wangzhanggui  经营者（**不再**附带管理员角色）
+* wangzhanggui  经营者
 * wangtaitai    家庭成员（已加入王家小院，邀请码 DEVDEMO1）
 * zixunxiaoli   咨询人员
 
@@ -31,7 +30,7 @@ def _guard_environment() -> None:
     if env in {"production", "prod"}:
         print(
             "拒绝在 production 环境生成固定密码的演示账号。"
-            "如需管理员，请使用 scripts/provision_admin.py。",
+            "如需咨询人员身份，请使用 scripts/provision_consultant.py。",
             file=sys.stderr,
         )
         raise SystemExit(2)
@@ -55,8 +54,7 @@ from app.utils.timeutil import utcnow  # noqa: E402
 PASSWORD = "Wendai2025"
 
 ACCOUNTS = [
-    # 经营者账号：**不再**附加 admin 角色。
-    # 管理员必须是彼此独立的账户，不能因为某个账号是经营者就顺带获得管理权限。
+    # 三种业务身份彼此独立，没有等级关系，也不存在 admin。
     ("wangzhanggui", "王掌柜", [ROLE_MERCHANT]),
     ("wangtaitai", "王太太", [ROLE_FAMILY_MEMBER]),
     ("zixunxiaoli", "咨询小李", [ROLE_CONSULTANT]),
@@ -182,9 +180,9 @@ def main() -> int:
         db.commit()
 
         print("演示账号就绪：")
-        print(f"  经营者+管理员  wangzhanggui  / {PASSWORD}")
-        print(f"  家庭成员       wangtaitai    / {PASSWORD}")
-        print(f"  咨询人员       zixunxiaoli   / {PASSWORD}")
+        print(f"  经营者     wangzhanggui  / {PASSWORD}")
+        print(f"  家庭成员   wangtaitai    / {PASSWORD}")
+        print(f"  咨询人员   zixunxiaoli   / {PASSWORD}")
         for line in result:
             print(f"  - {line}")
         print(f"  数据库 {os.environ.get('DATABASE_URL', '(来自 .env.production)')}")
