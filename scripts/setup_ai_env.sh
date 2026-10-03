@@ -30,12 +30,23 @@ SECRET="$(cat)"
 SECRET="${SECRET//$'\r'/}"
 SECRET="$(printf '%s' "$SECRET" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
 
+# 去掉不可见的填充字符。
+# 实测：从 Windows PowerShell 通过管道传输时，会在开头带一个 UTF-8 BOM
+# （U+FEFF），导致 Authorization 头在 ascii 编码时抛
+# UnicodeEncodeError，表现为「智能服务暂时不可用」。
+SECRET="$(printf '%s' "$SECRET" | tr -d '\357\273\277\342\200\213\342\200\214\342\200\215\302\240')"
+
 if [ -z "$SECRET" ]; then
   echo "未收到凭据内容（stdin 为空）" >&2
   exit 2
 fi
 if [[ "$SECRET" == *$'\n'* ]]; then
   echo "凭据内容包含换行，已拒绝写入" >&2
+  exit 2
+fi
+# 智谱密钥为可见 ASCII；出现非 ASCII 说明传输过程引入了杂质
+if printf '%s' "$SECRET" | LC_ALL=C grep -q '[^ -~]'; then
+  echo "凭据内容包含不可见或非 ASCII 字符，已拒绝写入" >&2
   exit 2
 fi
 
