@@ -80,3 +80,8 @@ playwright-report/
 test-results/
 blob-report/
 .playwright/
+
+# ---------- 本地临时文件（提交信息 / 测试日志） ----------
+.git-commit-msg.tmp
+.pytest-*.txt
+.e2e-*.txt

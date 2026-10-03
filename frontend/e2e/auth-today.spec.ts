@@ -9,6 +9,7 @@ import { expect, test } from '@playwright/test';
 
 import {
   PASSWORD,
+  apiUrl,
   appUrl,
   btn,
   createMerchantFixture,
@@ -48,6 +49,21 @@ test.describe('认证', () => {
   test('未登录访问业务页面会跳转到登录', async ({ page }) => {
     await page.goto(appUrl('/events'));
     await expect(page).toHaveURL(/\/login/, { timeout: 20_000 });
+  });
+
+  test('旧的管理后台地址不再渲染后台（V3 已移除 Admin）', async ({ page, request }) => {
+    const fixture = await createMerchantFixture(request, 'removedadmin');
+    await loginViaUi(page, fixture.user.username);
+
+    // 前端不再有 /admin 路由：命中兜底路由，渲染「页面不存在」。
+    await page.goto(appUrl('/admin'));
+    await expect(page.getByText('页面不存在')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText('系统概览')).toBeHidden();
+    await expect(page.getByText('用户管理')).toBeHidden();
+
+    // 旧接口也必须表现为「不存在」，而不是「无权限」。
+    const apiProbe = await request.get(apiUrl('admin', 'overview'));
+    expect(apiProbe.status()).toBe(404);
   });
 
   test('刷新页面保持登录状态', async ({ page, request }) => {

@@ -15,7 +15,6 @@ from app.core.errors import Forbidden, Unauthenticated
 from app.core.security import ACCESS_COOKIE_NAME, REFRESH_COOKIE_NAME, decode_token
 from app.models.merchant import MerchantProfile
 from app.models.user import (
-    ROLE_ADMIN,
     ROLE_CONSULTANT,
     ROLE_FAMILY_MEMBER,
     ROLE_MERCHANT,
@@ -96,7 +95,6 @@ def require_roles(*roles: str) -> Callable[..., User]:
 require_merchant = require_roles(ROLE_MERCHANT)
 require_consultant = require_roles(ROLE_CONSULTANT)
 require_family_member = require_roles(ROLE_FAMILY_MEMBER)
-require_admin = require_roles(ROLE_ADMIN)
 
 
 def get_merchant_profile(

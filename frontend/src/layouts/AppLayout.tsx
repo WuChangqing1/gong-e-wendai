@@ -10,6 +10,7 @@ import { BrandMark } from '@/components/Brand';
 import { authApi } from '@/api/auth';
 import { queryKeys, queryClient } from '@/api/queryClient';
 import { navForRoles } from '@/layouts/navigation';
+import { useResponsive } from '@/hooks/useResponsive';
 import { primaryRole, useAuthStore, useUiStore } from '@/store';
 import { ROLE_LABELS } from '@/utils/labels';
 
@@ -22,13 +23,15 @@ export default function AppLayout() {
   const clear = useAuthStore((state) => state.clear);
   const collapsed = useUiStore((state) => state.sidebarCollapsed);
   const toggleSidebar = useUiStore((state) => state.toggleSidebar);
-  const isMobile = useUiStore((state) => state.isMobile);
-  const setIsMobile = useUiStore((state) => state.setIsMobile);
+  const { isMobile, hasRoomForSidebar } = useResponsive();
 
   // 窄屏下一律收起左侧导航（导航改由底部导航承担）。
   // 只声明 Sider 的 breakpoint 而不接管 collapsed，窄屏时左侧仍会占用 216px，
   // 把内容区压到 150px 左右，图表与表格都会挤成一列。
-  const siderCollapsed = collapsed || isMobile;
+  //
+  // 断点由 useResponsive() 统一提供（>= 1024px 才展示侧栏），
+  // 不再依赖 Ant Design 的 breakpoint 回调，避免出现第二套断点语义。
+  const siderCollapsed = collapsed || !hasRoomForSidebar;
 
   const navItems = useMemo(() => navForRoles(user?.roles ?? []), [user?.roles]);
   const role = primaryRole(user);
@@ -69,7 +72,6 @@ export default function AppLayout() {
         breakpoint="lg"
         trigger={null}
         theme="light"
-        onBreakpoint={(broken) => setIsMobile(broken)}
       >
         <BrandMark collapsed={siderCollapsed} />
         <Menu

@@ -75,9 +75,6 @@ class Settings(BaseSettings):
     jwt_refresh_expire_days: int = Field(default=14)
     cookie_secure: bool = Field(default=False)
     cookie_domain: str | None = Field(default=None)
-    #: 允许通过 /auth/register 自助注册管理员（默认关闭）。生产环境应保持关闭，
-    #: 管理员账户通过 scripts/create_admin.py 创建。
-    allow_admin_registration: bool = Field(default=False)
 
     # ---------------- cors ----------------
     cors_origins: str = Field(default="http://localhost:5173,http://127.0.0.1:5173")

@@ -212,6 +212,35 @@ a:hover {
   }
 }
 
+/* 宽表在手机端需要横滑时给出可见提示与渐隐遮罩，避免用户以为内容被截断 */
+.gew-scroll-hint {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .gew-table-scroll {
+    position: relative;
+  }
+
+  .gew-table-scroll::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 24px;
+    background: linear-gradient(to right, rgba(255, 255, 255, 0), var(--surface));
+    pointer-events: none;
+  }
+
+  .gew-scroll-hint {
+    display: block;
+    padding: 0 var(--space-4) var(--space-3);
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+}
+
 /* 移动端底部导航 */
 .gew-tabbar {
   display: none;
@@ -665,8 +694,10 @@ a:hover {
 }
 
 @media (max-width: 767px) {
+  /* 手机端图表高度由组件按内容计算（inline style），这里不再固定覆盖，
+     否则「阶梯线」这类需要更高画布的图会被压扁。 */
   .gew-chart {
-    height: 260px;
+    width: 100%;
   }
 }
 
@@ -693,6 +724,19 @@ a:hover {
 }
 
 /* ---------------- 其他 ---------------- */
+.gew-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-5);
+}
+
+.gew-page-header__extra {
+  min-width: 0;
+}
+
 .gew-page-title {
   margin: 0 0 var(--space-2);
   font-size: 20px;
@@ -782,6 +826,487 @@ a:hover {
   margin: 0;
   max-height: 260px;
   overflow: auto;
+}
+
+/* ---------------- 延期天数步进器（手机友好） ---------------- */
+.gew-delay-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.gew-delay-row__hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.gew-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.gew-stepper .ant-btn {
+  border: none;
+  border-radius: 0;
+  min-width: 44px;
+  height: 40px;
+  font-size: 16px;
+}
+
+.gew-stepper__value {
+  min-width: 64px;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 0 6px;
+}
+
+@media (max-width: 767px) {
+  /* 手机上步进器独占一行，快捷天数换行排列 */
+  .gew-delay-row {
+    gap: var(--space-2);
+  }
+
+  .gewstepper,
+  .gew-stepper {
+    order: -1;
+  }
+}
+
+/* ---------------- 图表懒加载占位 ---------------- */
+.gew-chart-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-sunken);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.gew-chart-loading__text {
+  opacity: 0.75;
+}
+
+/* ---------------- 手机端「我的」设置列表 ---------------- */
+.gew-settings-menu {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.gew-settings-menu .ant-list-item {
+  padding: 14px var(--space-4);
+  min-height: 60px;
+  cursor: pointer;
+}
+
+.gew-settings-menu .ant-list-item:not(:last-child) {
+  border-bottom: 1px solid var(--divider);
+}
+
+.gew-settings-menu__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--surface-sunken);
+  color: var(--brand-red);
+  font-size: 17px;
+}
+
+.gew-settings-menu .ant-list-item-meta-title {
+  margin-bottom: 2px !important;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.gew-settings-menu .ant-list-item-meta-description {
+  font-size: 12px;
+}
+
+.gew-settings-detail__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: calc(-1 * var(--space-3));
+}
+
+.gew-settings-detail__title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* ---------------- 手机端筛选抽屉 ---------------- */
+.gew-filter-sheet .ant-drawer-body {
+  padding: var(--space-4);
+}
+
+.gew-filter-sheet__group {
+  margin-bottom: var(--space-4);
+}
+
+.gew-filter-sheet__label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.gew-filter-sheet__actions {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.gew-filter-sheet__actions .ant-btn {
+  flex: 1 1 0;
+  min-height: 44px;
+}
+
+/* ---------------- 手机端咨询卡片列表 ---------------- */
+.gew-consult-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.gew-consult-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gew-consult-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.gew-consult-card__no {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.gew-consult-card__type {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.gew-consult-card__question {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.gew-consult-card__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  border-top: 1px dashed var(--divider);
+  padding-top: 2px;
+}
+
+.gew-consult-card__time {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ---------------- 手机端家庭成员卡片 ---------------- */
+.gew-member-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.gew-member-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.gew-member-card__name {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.gew-member-card__meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* ---------------- 手机端历史数据分组卡片 ---------------- */
+.gew-history-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.gew-history-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface);
+}
+
+.gew-history-card__day {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.gew-history-card__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: 13px;
+  padding: 4px 0;
+}
+
+.gew-history-card__label {
+  color: var(--text-secondary);
+}
+
+/* ---------------- 手机端事项卡片列表 ----------------
+   替代桌面端 980px 宽表格，横向不再需要拖动。 */
+.gew-event-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.gew-event-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gew-event-card__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.gew-event-card__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 0;
+  word-break: break-word;
+}
+
+.gew-event-card__version {
+  font-size: 12px;
+  color: var(--text-muted);
+  align-self: center;
+}
+
+.gew-event-card__meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.gew-event-card__amounts {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.gew-event-card__time {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.gew-event-card__amounts .num:last-child {
+  margin-left: auto;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.gew-event-card__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  border-top: 1px dashed var(--divider);
+  padding-top: 4px;
+}
+
+.gew-event-card__source {
+  font-size: 12px;
+  color: var(--text-secondary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------------- 抽屉与底部操作区 ---------------- */
+.gew-drawer__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
+@media (max-width: 767px) {
+  /* 手机端抽屉全屏，底部操作区跟随安全区，避免被底部导航遮挡 */
+  .gew-drawer--mobile .ant-drawer-body {
+    padding-bottom: var(--space-4);
+  }
+
+  .gew-drawer__footer {
+    justify-content: stretch;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .gew-drawer__footer > .ant-btn,
+  .gew-drawer__footer > .ant-space {
+    flex: 1 1 auto;
+  }
+
+  /* 重要提交按钮的可点击高度不低于 44px */
+  .gew-drawer__footer .ant-btn {
+    min-height: 44px;
+  }
+}
+
+/* ---------------- 移动端专项适配 ----------------
+   断点 767px 与 hooks/useResponsive.ts 的 MOBILE_MAX 必须一致。
+   这里只处理纯样式差异；需要改变组件结构或图表配置的，走 useIsMobile()。 */
+
+/* 手机上隐藏页头重复标题，只保留副标题；
+   H1 仍留在 DOM 中供屏幕阅读器与自动化用例定位，不影响语义与可检索性。 */
+@media (max-width: 767px) {
+  .gew-page-title {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .gew-page-subtitle {
+    margin-bottom: var(--space-3);
+  }
+
+  /* 页头标题与页面标题重复：窄屏顶部改为「品牌 + 当前导航项」，与底部导航形成呼应 */
+  .gew-header__title {
+    display: none;
+  }
+
+  .gew-header::before {
+    content: '';
+    display: block;
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    background: var(--brand-red);
+    flex: 0 0 auto;
+  }
+
+  .gew-header__meta {
+    gap: var(--space-2);
+  }
+
+  /* 「我的」等页面的页签在窄屏改为横向滑动；
+     隐藏 Ant Design 的溢出折叠菜单，避免「智能服务」被折进 ... 里点不到。 */
+  .ant-tabs-nav-wrap {
+    overflow-x: auto !important;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  .ant-tabs-nav-wrap::-webkit-scrollbar {
+    display: none;
+  }
+
+  .ant-tabs-nav-list {
+    flex-wrap: nowrap;
+  }
+
+  .ant-tabs-tab {
+    flex: 0 0 auto;
+  }
+
+  .ant-tabs-nav-more {
+    display: none !important;
+  }
+
+  /* iOS Safari 在字体小于 16px 的输入框聚焦时会自动放大整页，
+     导致「手机端显示很怪」。表单控件统一 16px 以关闭该行为。 */
+  .gew-content input.ant-input,
+  .gew-content input.ant-input-affix-wrapper > input,
+  .gew-content textarea.ant-input,
+  .gew-content .ant-input-number-input,
+  .gew-content .ant-select-selection-search-input,
+  .gew-content .ant-picker input {
+    font-size: 16px;
+  }
+
+  /* 底部导航：保证触控区高度与标签完整性 */
+  .gew-tabbar {
+    height: auto;
+    min-height: var(--mobile-tabbar-height);
+  }
+
+  .gew-tabbar__item {
+    padding: 6px 2px;
+    font-size: 12px;
+    line-height: 1.2;
+    word-break: keep-all;
+    gap: 3px;
+  }
+
+  .gew-tabbar__icon {
+    font-size: 19px;
+  }
 }
 
 /* 无障碍：焦点可见 */

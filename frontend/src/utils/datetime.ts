@@ -51,6 +51,17 @@ export function formatWeekday(value: string | Date | null | undefined): string {
   return local ? local.format('ddd') : '--';
 }
 
+/**
+ * 窄屏图表的短日期标签：`10/3`。
+ *
+ * 手机画布约 316px，放不下「10月3日 + 周六」两行标签乘以 8-9 个刻度，
+ * 因此手机端图表统一使用这个格式（不需要再拼接星期）。
+ */
+export function formatCompactDay(value: string | Date | null | undefined): string {
+  const local = toLocal(value);
+  return local ? local.format('M/D') : '--';
+}
+
 /** 相对时间：3 小时前 */
 export function formatRelative(value: string | Date | null | undefined): string {
   const local = toLocal(value);

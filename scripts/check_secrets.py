@@ -71,7 +71,14 @@ def staged_files() -> list[str]:
 
 
 def read_secret() -> str:
-    """读取当前进程可用的 GLM 密钥。只检查是否存在，不输出内容。"""
+    """读取当前进程可用的 GLM 密钥。只检查是否存在，不输出内容。
+
+    查找顺序：进程环境变量 → Windows 机器级 → Windows 用户级。
+
+    Windows 的**机器级**环境变量在
+    ``HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment``，
+    不是 ``HKLM\\Environment``（XP 时代遗留位置，现代系统为空）。
+    """
     value = os.environ.get("GLM", "")
     if value:
         return value.strip()
@@ -81,7 +88,11 @@ def read_secret() -> str:
         import winreg  # noqa: PLC0415
 
         for root, sub in (
-            (winreg.HKEY_LOCAL_MACHINE, "Environment"),
+            (
+                winreg.HKEY_LOCAL_MACHINE,
+                r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment",
+            ),
+            (winreg.HKEY_LOCAL_MACHINE, "Environment"),  # 兼容旧位置
             (winreg.HKEY_CURRENT_USER, "Environment"),
         ):
             try:

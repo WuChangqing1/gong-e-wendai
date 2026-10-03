@@ -223,9 +223,8 @@ status_label = 资金安排可行      ← 违反规格
 ### 角色收紧
 
 * 公开注册**只允许** `merchant` 与 `family_member`
-* `consultant` 只能由管理员通过 `POST /admin/users` 创建或授予
-* `admin` 只能由已有管理员或 `scripts/provision_admin.py` 创建
-* 经营者账号不会因为普通经营身份自动获得 `admin`
+* `consultant` 由安全脚本 `scripts/provision_consultant.py` 开通
+* 本系统不存在 `admin` 身份（V3 起已移除 Admin 产品模块）
 
 ---
 

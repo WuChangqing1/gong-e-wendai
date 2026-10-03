@@ -7,8 +7,10 @@ import {
   App as AntdApp,
   Button,
   DatePicker,
+  Drawer,
   Empty,
   Input,
+  Pagination,
   Popconfirm,
   Select,
   Space,
@@ -21,6 +23,7 @@ import type { ColumnsType } from 'antd/es/table';
 import {
   EditOutlined,
   FileSearchOutlined,
+  FilterOutlined,
   HistoryOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -32,13 +35,15 @@ import {
 import { cashEventApi, type CashEventQuery } from '@/api/cashflow';
 import { errorMessage } from '@/api/client';
 import { queryKeys, queryClient } from '@/api/queryClient';
-import { MetricCard, PageHeader, SectionCard, StatusTag } from '@/components/ui';
+import { MetricCard, PageHeader, ResponsiveDataView, SectionCard, StatusTag } from '@/components/ui';
 import EventFormDrawer from '@/features/events/EventFormDrawer';
+import MobileEventList from '@/features/events/MobileEventList';
 import RevisionDrawer from '@/features/events/RevisionDrawer';
 import SourceDrawer from '@/features/events/SourceDrawer';
 import SmartInputDrawer from '@/features/ai/SmartInputDrawer';
 import ImportDrawer from '@/features/import/ImportDrawer';
 import { HistoryPane, SettlementPane } from '@/features/enhancement/HistoryPanes';
+import { useIsMobile } from '@/hooks/useResponsive';
 import type { CashEvent, Direction } from '@/types';
 import { formatCny, formatSigned } from '@/utils/money';
 import { formatDateTime } from '@/utils/datetime';
@@ -55,6 +60,8 @@ export default function EventsPage() {
   const { message } = AntdApp.useApp();
   const queryClientInstance = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
+  const isMobile = useIsMobile();
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -77,6 +84,123 @@ export default function EventsPage() {
       setSourceId(focusId);
     }
   }, [focusId]);
+
+  /** 手机端折叠筛选时，用来提示「当前有几项筛选条件生效」，避免用户在无结果时找不到原因。 */
+  const activeFilterCount =
+    (search ? 1 : 0) +
+    (direction ? 1 : 0) +
+    (state ? 1 : 0) +
+    (eventType ? 1 : 0) +
+    (range ? 1 : 0);
+
+  const resetFilters = () => {
+    setSearch('');
+    setDirection(undefined);
+    setState(undefined);
+    setEventType(undefined);
+    setRange(null);
+    setPage(1);
+  };
+
+  /**
+   * 筛选控件。桌面端平铺、手机端放进底部抽屉 —— 用的是同一份节点，
+   * 避免两套实现随时间漂移出不一致的选项。
+   */
+  const filterControls = (layout: 'inline' | 'sheet') => {
+    const width = (desktop: number) => (layout === 'sheet' ? '100%' : desktop);
+    const select = (
+      <Select
+        allowClear
+        placeholder="收支方向"
+        style={{ width: width(130) }}
+        value={direction}
+        onChange={(value) => {
+          setDirection(value);
+          setPage(1);
+        }}
+        options={[
+          { value: 'inflow', label: '收入' },
+          { value: 'outflow', label: '支出' },
+        ]}
+      />
+    );
+    const stateSelect = (
+      <Select
+        allowClear
+        placeholder="状态"
+        style={{ width: width(150) }}
+        value={state}
+        onChange={(value) => {
+          setState(value);
+          setPage(1);
+        }}
+        options={[
+          { value: 'scheduled', label: '计划中' },
+          { value: 'included_in_opening', label: '已计入期初' },
+          { value: 'cancelled', label: '已取消' },
+        ]}
+      />
+    );
+    const typeSelect = (
+      <Select
+        allowClear
+        placeholder="事项类型"
+        style={{ width: width(150) }}
+        value={eventType}
+        onChange={(value) => {
+          setEventType(value);
+          setPage(1);
+        }}
+        options={Object.entries(EVENT_TYPE_LABELS).map(([value, label]) => ({ value, label }))}
+      />
+    );
+    const dateRange = (
+      <DatePicker.RangePicker
+        showTime={{ format: 'HH:mm' }}
+        style={{ width: layout === 'sheet' ? '100%' : undefined }}
+        onChange={(values) => {
+          if (values && values[0] && values[1]) {
+            setRange([values[0].toISOString(), values[1].toISOString()]);
+          } else {
+            setRange(null);
+          }
+          setPage(1);
+        }}
+      />
+    );
+
+    if (layout === 'sheet') {
+      return (
+        <>
+          <div className="gew-filter-sheet__group">
+            <span className="gew-filter-sheet__label">预计时间区间</span>
+            {dateRange}
+          </div>
+          <div className="gew-filter-sheet__group">
+            <span className="gew-filter-sheet__label">收支方向</span>
+            {select}
+          </div>
+          <div className="gew-filter-sheet__group">
+            <span className="gew-filter-sheet__label">状态</span>
+            {stateSelect}
+          </div>
+          <div className="gew-filter-sheet__group">
+            <span className="gew-filter-sheet__label">事项类型</span>
+            {typeSelect}
+          </div>
+        </>
+      );
+    }
+
+    return (
+      <>
+        {select}
+        {stateSelect}
+        {typeSelect}
+        {dateRange}
+      </>
+    );
+  };
 
   const params: CashEventQuery = useMemo(
     () => ({
@@ -327,120 +451,138 @@ export default function EventsPage() {
         }
       >
         <Space wrap style={{ marginBottom: 16 }}>
-          <Input.Search
-            allowClear
-            placeholder="搜索事项名称、编号、备注"
-            style={{ width: 240 }}
-            onSearch={(value) => {
-              setSearch(value);
-              setPage(1);
-            }}
-          />
-          <Select
-            allowClear
-            placeholder="收支方向"
-            style={{ width: 130 }}
-            value={direction}
-            onChange={(value) => {
-              setDirection(value);
-              setPage(1);
-            }}
-            options={[
-              { value: 'inflow', label: '收入' },
-              { value: 'outflow', label: '支出' },
-            ]}
-          />
-          <Select
-            allowClear
-            placeholder="状态"
-            style={{ width: 150 }}
-            value={state}
-            onChange={(value) => {
-              setState(value);
-              setPage(1);
-            }}
-            options={[
-              { value: 'scheduled', label: '计划中' },
-              { value: 'included_in_opening', label: '已计入期初' },
-              { value: 'cancelled', label: '已取消' },
-            ]}
-          />
-          <Select
-            allowClear
-            placeholder="事项类型"
-            style={{ width: 150 }}
-            value={eventType}
-            onChange={(value) => {
-              setEventType(value);
-              setPage(1);
-            }}
-            options={Object.entries(EVENT_TYPE_LABELS).map(([value, label]) => ({ value, label }))}
-          />
-          <DatePicker.RangePicker
-            showTime={{ format: 'HH:mm' }}
-            onChange={(values) => {
-              if (values && values[0] && values[1]) {
-                setRange([values[0].toISOString(), values[1].toISOString()]);
-              } else {
-                setRange(null);
-              }
-              setPage(1);
-            }}
-          />
-          <Button
-            onClick={() => {
-              setSearch('');
-              setDirection(undefined);
-              setState(undefined);
-              setEventType(undefined);
-              setRange(null);
-              setPage(1);
-            }}
-          >
-            重置
-          </Button>
+          {isMobile ? (
+            <>
+              <Input.Search
+                allowClear
+                placeholder="搜索事项名称、编号、备注"
+                style={{ width: 'calc(100% - 96px)' }}
+                onSearch={(value) => {
+                  setSearch(value);
+                  setPage(1);
+                }}
+              />
+              {/* 手机端不把 4 个下拉塞成一行：筛选收进底部抽屉，按钮上显示生效条件数。 */}
+              <Button
+                icon={<FilterOutlined />}
+                onClick={() => setFiltersOpen(true)}
+                type={activeFilterCount > 0 ? 'primary' : 'default'}
+                ghost={activeFilterCount > 0}
+              >
+                筛选{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
+              </Button>
+            </>
+          ) : (
+            <>
+              <Input.Search
+                allowClear
+                placeholder="搜索事项名称、编号、备注"
+                style={{ width: 240 }}
+                onSearch={(value) => {
+                  setSearch(value);
+                  setPage(1);
+                }}
+              />
+              {filterControls('inline')}
+              <Button onClick={resetFilters}>重置</Button>
+            </>
+          )}
         </Space>
 
-        <Table<CashEvent>
-          rowKey="id"
-          columns={columns}
-          dataSource={listQuery.data?.items ?? []}
-          loading={listQuery.isLoading}
-          size="middle"
-          scroll={{ x: 980 }}
-          locale={{
-            emptyText: (
-              <Empty
-                description="还没有收付款事项"
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-              >
-                <Space>
-                  <Button
-                    type="primary"
-                    icon={<PlusOutlined />}
-                    onClick={() => {
-                      setEditing(null);
-                      setFormOpen(true);
-                    }}
+        <Drawer
+          title="筛选收付款事项"
+          placement="bottom"
+          height="auto"
+          open={isMobile && filtersOpen}
+          onClose={() => setFiltersOpen(false)}
+          className="gew-filter-sheet"
+          footer={
+            <div className="gew-filter-sheet__actions">
+              <Button onClick={resetFilters}>重置</Button>
+              <Button type="primary" onClick={() => setFiltersOpen(false)}>
+                确认
+              </Button>
+            </div>
+          }
+        >
+          {filterControls('sheet')}
+        </Drawer>
+
+        <ResponsiveDataView
+          mobileCards={
+            <MobileEventList
+              items={listQuery.data?.items ?? []}
+              loading={listQuery.isLoading}
+              onCreate={() => {
+                setEditing(null);
+                setFormOpen(true);
+              }}
+              onImport={() => setImportOpen(true)}
+              onEdit={(record) => {
+                setEditing(record);
+                setFormOpen(true);
+              }}
+              onShowSource={(record) => setSourceId(record.id)}
+              onShowRevisions={(record) => setRevisionId(record.id)}
+              onCancel={(record) => cancelMutation.mutate(record.id)}
+            />
+          }
+          desktopTable={
+            <Table<CashEvent>
+              rowKey="id"
+              columns={columns}
+              dataSource={listQuery.data?.items ?? []}
+              loading={listQuery.isLoading}
+              size="middle"
+              scroll={{ x: 980 }}
+              locale={{
+                emptyText: (
+                  <Empty
+                    description="还没有收付款事项"
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
                   >
-                    新增事项
-                  </Button>
-                  <Button icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>
-                    导入 CSV
-                  </Button>
-                </Space>
-              </Empty>
-            ),
-          }}
-          pagination={{
-            current: listQuery.data?.meta.page ?? 1,
-            pageSize: PAGE_SIZE,
-            total: listQuery.data?.meta.total ?? 0,
-            showSizeChanger: false,
-            onChange: setPage,
-            showTotal: (total) => `共 ${total} 条`,
-          }}
+                    <Space>
+                      <Button
+                        type="primary"
+                        icon={<PlusOutlined />}
+                        onClick={() => {
+                          setEditing(null);
+                          setFormOpen(true);
+                        }}
+                      >
+                        新增事项
+                      </Button>
+                      <Button icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>
+                        导入 CSV
+                      </Button>
+                    </Space>
+                  </Empty>
+                ),
+              }}
+              pagination={{
+                current: listQuery.data?.meta.page ?? 1,
+                pageSize: PAGE_SIZE,
+                total: listQuery.data?.meta.total ?? 0,
+                showSizeChanger: false,
+                onChange: setPage,
+                showTotal: (total) => `共 ${total} 条`,
+              }}
+            />
+          }
         />
+
+        {isMobile && (!listQuery.data || listQuery.data.meta.total > PAGE_SIZE) ? (
+          <Pagination
+            size="small"
+            style={{ marginTop: 16, textAlign: 'center' }}
+            current={listQuery.data?.meta.page ?? 1}
+            pageSize={PAGE_SIZE}
+            total={listQuery.data?.meta.total ?? 0}
+            showSizeChanger={false}
+            onChange={setPage}
+            showTotal={(total) => `共 ${total} 条`}
+          />
+        ) : null}
       </SectionCard>
         </>
       )}

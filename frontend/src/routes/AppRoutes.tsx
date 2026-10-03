@@ -15,9 +15,6 @@ import FamilyCardsPage from '@/pages/FamilyCardsPage';
 import ConsultationsPage from '@/pages/ConsultationsPage';
 import ConsultantWorkspacePage from '@/pages/ConsultantWorkspacePage';
 import SettingsPage from '@/pages/SettingsPage';
-import AdminOverviewPage from '@/pages/AdminOverviewPage';
-import AdminUsersPage from '@/pages/AdminUsersPage';
-import AdminRuntimePage from '@/pages/AdminRuntimePage';
 import NotFoundPage from '@/pages/NotFoundPage';
 
 export default function AppRoutes() {
@@ -52,7 +49,7 @@ export default function AppRoutes() {
         <Route
           path="/today"
           element={
-            <RequireRole roles={['merchant', 'admin']}>
+            <RequireRole roles={['merchant']}>
               <TodayPage />
             </RequireRole>
           }
@@ -60,7 +57,7 @@ export default function AppRoutes() {
         <Route
           path="/events"
           element={
-            <RequireRole roles={['merchant', 'admin']}>
+            <RequireRole roles={['merchant']}>
               <EventsPage />
             </RequireRole>
           }
@@ -68,7 +65,7 @@ export default function AppRoutes() {
         <Route
           path="/analysis"
           element={
-            <RequireRole roles={['merchant', 'admin']}>
+            <RequireRole roles={['merchant']}>
               <AnalysisPage />
             </RequireRole>
           }
@@ -76,7 +73,7 @@ export default function AppRoutes() {
         <Route
           path="/family"
           element={
-            <RequireRole roles={['merchant', 'admin']}>
+            <RequireRole roles={['merchant']}>
               <FamilyPage />
             </RequireRole>
           }
@@ -85,7 +82,7 @@ export default function AppRoutes() {
         <Route
           path="/consultations"
           element={
-            <RequireRole roles={['merchant', 'admin']}>
+            <RequireRole roles={['merchant']}>
               <ConsultationsPage />
             </RequireRole>
           }
@@ -95,7 +92,7 @@ export default function AppRoutes() {
         <Route
           path="/consultant"
           element={
-            <RequireRole roles={['consultant', 'admin']}>
+            <RequireRole roles={['consultant']}>
               <ConsultantWorkspacePage />
             </RequireRole>
           }
@@ -103,33 +100,8 @@ export default function AppRoutes() {
         <Route
           path="/consultant/records"
           element={
-            <RequireRole roles={['consultant', 'admin']}>
+            <RequireRole roles={['consultant']}>
               <ConsultantWorkspacePage onlyRecords />
-            </RequireRole>
-          }
-        />
-
-        <Route
-          path="/admin"
-          element={
-            <RequireRole roles={['admin']}>
-              <AdminOverviewPage />
-            </RequireRole>
-          }
-        />
-        <Route
-          path="/admin/users"
-          element={
-            <RequireRole roles={['admin']}>
-              <AdminUsersPage />
-            </RequireRole>
-          }
-        />
-        <Route
-          path="/admin/runtime"
-          element={
-            <RequireRole roles={['admin']}>
-              <AdminRuntimePage />
             </RequireRole>
           }
         />

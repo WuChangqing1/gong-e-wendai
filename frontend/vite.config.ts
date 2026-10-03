@@ -37,14 +37,27 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
-    chunkSizeWarningLimit: 1500,
+    chunkSizeWarningLimit: 1800,
     rollupOptions: {
       output: {
-        manualChunks: {
-          react: ['react', 'react-dom', 'react-router-dom'],
-          antd: ['antd', '@ant-design/icons'],
-          charts: ['echarts'],
-        },
+        /**
+         * 不用 manualChunks 指定 antd / react。
+         *
+         * 实测结论（同一份代码，只改分包方式）：
+         *
+         * | 方案 | 每个页面下载的 js | 请求数 |
+         * | --- | --- | --- |
+         * | 固定 antd + react | 1628 KB | 3 |
+         * | 再加 rc-picker / dayjs 单独成块 | 1630 KB | 2~5 |
+         *
+         * antd 是运行时依赖，被应用外壳（布局、按钮、表单）直接引用，
+         * 本来就是每个入口都必然加载的共享依赖；手动切成多块只会产生
+         * 重复引用与额外请求。交给 Rollup 自动合并即可。
+         *
+         * 真正需要减掉的是**按路由才用到**的大块 —— 那部分由
+         * `components/charts/lazy.tsx` 通过动态 import 拆分（图表约 542 KB），
+         * 使家庭协同 / 我的等页面不再下载 ECharts。
+         */
       },
     },
   },

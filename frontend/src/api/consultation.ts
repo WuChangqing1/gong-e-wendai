@@ -39,36 +39,3 @@ export const consultantApi = {
   close: (id: string, payload: { resolution_summary?: string } = {}) =>
     post<ConsultationCase>(`/consultations/${id}/close`, payload),
 };
-
-export const adminApi = {
-  overview: () =>
-    get<{
-      users: number;
-      merchants: number;
-      cash_events: number;
-      consultations: number;
-      households: number;
-      analysis_results: number;
-      ai_enabled: boolean;
-      app_env: string;
-      version: string;
-    }>('/admin/overview'),
-  users: (params: { page?: number; page_size?: number; search?: string } = {}) =>
-    get<Page<{ id: string; username: string; display_name: string; roles: string[]; status: string; created_at: string; last_login_at: string | null }>>(
-      '/admin/users',
-      { params },
-    ),
-  setUserStatus: (userId: string, status: 'active' | 'disabled') =>
-    post<{ message: string }>(`/admin/users/${userId}/status`, { status }),
-  runtime: () =>
-    get<{
-      database_ok: boolean;
-      database_size_bytes: number;
-      wal_enabled: boolean;
-      uptime_seconds: number;
-      event_count: number;
-      stale_results: number;
-      recent_errors: string[];
-    }>('/admin/runtime'),
-  audit: (limit = 50) => get<Record<string, unknown>[]>('/admin/audit-logs', { params: { limit } }),
-};

@@ -28,12 +28,14 @@ import { InboxOutlined, ReloadOutlined } from '@ant-design/icons';
 
 import {
   enhancementApi,
+  type DailyHistoryRow,
   type HistoryImportRow,
   type SettlementRecordRow,
 } from '@/api/enhancements';
 import { errorMessage } from '@/api/client';
 import { queryKeys, queryClient } from '@/api/queryClient';
-import { InlineNote, MetricCard, SectionCard } from '@/components/ui';
+import { InlineNote, MetricCard, ResponsiveDataView, SectionCard } from '@/components/ui';
+import MobileHistoryCards from '@/features/enhancement/MobileHistoryCards';
 import { formatCny } from '@/utils/money';
 import { formatDateTime } from '@/utils/datetime';
 import { decodeCsvFile, parseCsvText } from '@/utils/csv';
@@ -372,43 +374,48 @@ export function HistoryPane() {
                 } 天）`}
               />
             ) : null}
-            <Table
-              size="small"
-              rowKey="id"
-              pagination={{ pageSize: 10 }}
-              dataSource={historyQuery.data.items}
-              scroll={{ x: 560 }}
-              columns={[
-                { title: '日期', dataIndex: 'day', width: 120 },
-                {
-                  title: '收入',
-                  dataIndex: 'inflow_cents',
-                  align: 'right' as const,
-                  render: (value: number) => <span className="num">{formatCny(value)}</span>,
-                },
-                {
-                  title: '支出',
-                  dataIndex: 'outflow_cents',
-                  align: 'right' as const,
-                  render: (value: number) => <span className="num">{formatCny(value)}</span>,
-                },
-                {
-                  title: '净额',
-                  dataIndex: 'net_cents',
-                  align: 'right' as const,
-                  render: (value: number) => <span className="num">{formatCny(value)}</span>,
-                },
-                {
-                  title: '完整性',
-                  dataIndex: 'completeness_confirmed',
-                  width: 130,
-                  render: (value: boolean) => (
-                    <Tag bordered={false} color={value ? 'green' : 'default'}>
-                      {value ? '已确认完整' : '按记录导入'}
-                    </Tag>
-                  ),
-                },
-              ]}
+            <ResponsiveDataView
+              mobileCards={<MobileHistoryCards items={historyQuery.data.items as DailyHistoryRow[]} />}
+              desktopTable={
+                <Table
+                  size="small"
+                  rowKey="id"
+                  pagination={{ pageSize: 10 }}
+                  dataSource={historyQuery.data.items}
+                  scroll={{ x: 560 }}
+                  columns={[
+                    { title: '日期', dataIndex: 'day', width: 120 },
+                    {
+                      title: '收入',
+                      dataIndex: 'inflow_cents',
+                      align: 'right' as const,
+                      render: (value: number) => <span className="num">{formatCny(value)}</span>,
+                    },
+                    {
+                      title: '支出',
+                      dataIndex: 'outflow_cents',
+                      align: 'right' as const,
+                      render: (value: number) => <span className="num">{formatCny(value)}</span>,
+                    },
+                    {
+                      title: '净额',
+                      dataIndex: 'net_cents',
+                      align: 'right' as const,
+                      render: (value: number) => <span className="num">{formatCny(value)}</span>,
+                    },
+                    {
+                      title: '完整性',
+                      dataIndex: 'completeness_confirmed',
+                      width: 130,
+                      render: (value: boolean) => (
+                        <Tag bordered={false} color={value ? 'green' : 'default'}>
+                          {value ? '已确认完整' : '按记录导入'}
+                        </Tag>
+                      ),
+                    },
+                  ]}
+                />
+              }
             />
           </div>
         ) : (
@@ -551,6 +558,7 @@ export function SettlementPane() {
             placeholder="手动补录：结算款金额（元）"
             min={0}
             precision={2}
+            inputMode="decimal"
             onChange={(value) => setManualKey(value === null ? '' : String(value))}
           />
           <Button

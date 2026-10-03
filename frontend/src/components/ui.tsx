@@ -2,6 +2,8 @@
 
 import type { ReactNode } from 'react';
 
+import { useIsMobile } from '@/hooks/useResponsive';
+
 type Tone = 'ok' | 'warning' | 'danger' | 'info' | 'neutral';
 
 const TONE_ICON: Record<Tone, string> = {
@@ -100,23 +102,38 @@ export function PageHeader({
   extra?: ReactNode;
 }) {
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'flex-start',
-        justifyContent: 'space-between',
-        gap: 16,
-        flexWrap: 'wrap',
-        marginBottom: 20,
-      }}
-    >
+    <div className="gew-page-header">
       <div>
+        {/* 手机端由 CSS 把这个 H1 视觉隐藏（顶部栏已显示当前页面名），
+            但仍留在 DOM 中，保证屏幕阅读器与自动化用例能定位到页面标题。 */}
         <h1 className="gew-page-title">{title}</h1>
         {subtitle ? <p className="gew-page-subtitle">{subtitle}</p> : null}
       </div>
-      {extra}
+      {extra ? <div className="gew-page-header__extra">{extra}</div> : null}
     </div>
   );
+}
+
+/**
+ * 响应式数据视图：桌面渲染高信息密度表格，手机渲染卡片列表。
+ *
+ * 这是「手机端不再横向拖动宽表格」的统一入口。页面组件不要自己判断
+ * `window.innerWidth`，也不要重复写 767 这类魔法数字。
+ *
+ * 两个视图都必须是**纯展示**：数据、分页与查询状态由调用方持有，
+ * 切换视口不会触发任何接口请求。
+ */
+export function ResponsiveDataView({
+  desktopTable,
+  mobileCards,
+}: {
+  /** 桌面（>= 768px）视图，通常是 Ant Design `<Table>` */
+  desktopTable: ReactNode;
+  /** 手机（<= 767px）视图，通常是卡片列表 */
+  mobileCards: ReactNode;
+}) {
+  const isMobile = useIsMobile();
+  return <>{isMobile ? mobileCards : desktopTable}</>;
 }
 
 export function InlineNote({

@@ -1,6 +1,6 @@
 /** 今日决策页：最大可提用金额是页面视觉中心。 */
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import {
@@ -20,6 +20,7 @@ import {
 } from 'antd';
 import {
   ArrowRightOutlined,
+  BarChartOutlined,
   BulbOutlined,
   ReloadOutlined,
   ShareAltOutlined,
@@ -30,7 +31,11 @@ import { merchantApi } from '@/api/auth';
 import { analysisApi, cashEventApi, type AnalysisRunPayload } from '@/api/cashflow';
 import { errorMessage } from '@/api/client';
 import { queryKeys, queryClient } from '@/api/queryClient';
-import CashflowChart from '@/components/CashflowChart';
+import {
+  AnalysisChartsPanelLazy,
+  CashflowChartLazy,
+  ChartLoading,
+} from '@/components/charts/lazy';
 import {
   DescriptionGrid,
   InlineNote,
@@ -40,9 +45,9 @@ import {
   StatusTag,
 } from '@/components/ui';
 import AiExplainPanel from '@/features/ai/AiExplainPanel';
-import AnalysisChartsPanel from '@/features/analysis/AnalysisChartsPanel';
 import EnhancementPanel from '@/features/enhancement/EnhancementPanel';
 import ShareCardDrawer from '@/features/household/ShareCardDrawer';
+import { useIsMobile } from '@/hooks/useResponsive';
 import type { AnalysisMode, AnalysisResult } from '@/types';
 import { formatCny, splitCny } from '@/utils/money';
 import { formatDateTime } from '@/utils/datetime';
@@ -147,6 +152,7 @@ function HeroAmount({ result, onOpenReason, onOpenShare, onGoToEvents }: HeroPro
 
 export default function TodayPage() {
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const { message } = AntdApp.useApp();
   const [mode, setMode] = useState<AnalysisMode>('current_plan');
   const [reasonOpen, setReasonOpen] = useState(false);
@@ -195,6 +201,35 @@ export default function TodayPage() {
   const overview = overviewQuery.data;
   const scenarios = result?.scenarios?.length ? result.scenarios : [];
 
+  /**
+   * 资金曲线与图表组。
+   *
+   * 桌面端紧随「当前资金」概览，手机端移到「最紧张时点」之后 ——
+   * 手机上首屏要先给出结论与关键数字，图表属于第二层信息。
+   */
+  const moneyCharts = result ? (
+    <>
+      <SectionCard
+        title="未来 7 天资金趋势"
+        extra={
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            阶梯线表示余额在每笔事项发生时的跳变
+          </span>
+        }
+      >
+        {/* 图表 chunk 按需加载；Suspense 只包住图表本身，不阻塞页面其余部分 */}
+        <Suspense fallback={<ChartLoading height={320} />}>
+          <CashflowChartLazy scenarios={scenarios} bufferCents={result.buffer_cents} />
+        </Suspense>
+      </SectionCard>
+
+      {/* 图表化分析：每日收支与待结算到账分布 */}
+      <Suspense fallback={<ChartLoading height={520} />}>
+        <AnalysisChartsPanelLazy analysis={result} compact />
+      </Suspense>
+    </>
+  ) : null;
+
   return (
     <div className="gew-stack">
       <PageHeader
@@ -211,6 +246,12 @@ export default function TodayPage() {
               value={mode}
               onChange={(value) => setMode(value as AnalysisMode)}
             />
+            {isMobile ? (
+              // 手机底部标签栏最多 5 项，情景分析不占位；入口放在首页，地址与桌面一致。
+              <Button icon={<BarChartOutlined />} onClick={() => navigate('/analysis')}>
+                情景分析
+              </Button>
+            ) : null}
             <Tooltip title="重新计算">
               <Button
                 icon={<ReloadOutlined />}
@@ -327,20 +368,6 @@ export default function TodayPage() {
           </Row>
 
           <SectionCard
-            title="未来 7 天资金趋势"
-            extra={
-              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                阶梯线表示余额在每笔事项发生时的跳变
-              </span>
-            }
-          >
-            <CashflowChart scenarios={scenarios} bufferCents={result.buffer_cents} />
-          </SectionCard>
-
-          {/* 图表化分析：每日收支与待结算到账分布 */}
-          <AnalysisChartsPanel analysis={result} compact />
-
-          <SectionCard
             title="最紧张资金时点"
             extra={<StatusTag tone="warning">限制今日可提用金额</StatusTag>}
           >
@@ -375,6 +402,14 @@ export default function TodayPage() {
               </Space>
             </div>
           </SectionCard>
+
+          {/*
+            手机端信息顺序（渐进式披露）：
+            今日结论 → 当前资金 → 资金曲线与图表 → 最紧张时点 → 缺口与家庭协同
+            → 资金安排参考 → 解读
+            桌面端保持原有排布：图表紧随资金概览。
+          */}
+          {!isMobile ? moneyCharts : null}
 
           <Row gutter={[16, 16]}>
             <Col xs={24} lg={12}>
@@ -427,6 +462,8 @@ export default function TodayPage() {
               </div>
             </Col>
           </Row>
+
+          {isMobile ? moneyCharts : null}
 
           {/* 资金安排参考：结算延期压力 / 未来 7 天日常收付参考 / 建议经营留底 */}
           <EnhancementPanel />
@@ -589,7 +626,13 @@ export default function TodayPage() {
             extra="只填写已经到账、可以立即动用的金额，待结算资金不要计入。"
             rules={[{ required: true, message: '请输入当前可用经营资金' }]}
           >
-            <InputNumber min={0} precision={2} style={{ width: '100%' }} size="large" />
+            <InputNumber
+              min={0}
+              precision={2}
+              style={{ width: '100%' }}
+              size="large"
+              inputMode="decimal"
+            />
           </Form.Item>
           <Form.Item
             name="buffer"
@@ -597,7 +640,13 @@ export default function TodayPage() {
             extra="你希望始终保留在经营账户中的金额，用于覆盖临时采购、找零与突发支出。"
             rules={[{ required: true, message: '请输入经营留底金额' }]}
           >
-            <InputNumber min={0} precision={2} style={{ width: '100%' }} size="large" />
+            <InputNumber
+              min={0}
+              precision={2}
+              style={{ width: '100%' }}
+              size="large"
+              inputMode="decimal"
+            />
           </Form.Item>
         </Form>
       </Modal>

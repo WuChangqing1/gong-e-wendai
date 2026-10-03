@@ -27,7 +27,15 @@ import { consultationApi } from '@/api/consultation';
 import { aiApi } from '@/api/ai';
 import { AI_FALLBACK_MESSAGE, errorMessage } from '@/api/client';
 import { queryKeys } from '@/api/queryClient';
-import { DescriptionGrid, InlineNote, PageHeader, SectionCard, StatusTag } from '@/components/ui';
+import {
+  DescriptionGrid,
+  InlineNote,
+  PageHeader,
+  ResponsiveDataView,
+  SectionCard,
+  StatusTag,
+} from '@/components/ui';
+import MobileConsultationList from '@/features/consultation/MobileConsultationList';
 import RevisionDrawer from '@/features/events/RevisionDrawer';
 import type { ConsultationCase, ConsultationStatus } from '@/types';
 import { formatCny } from '@/utils/money';
@@ -218,29 +226,41 @@ export default function ConsultationsPage() {
           />
         }
       >
-        <Table<ConsultationCase>
-          rowKey="id"
-          size="middle"
-          columns={columns}
-          dataSource={listQuery.data?.items ?? []}
-          loading={listQuery.isLoading}
-          scroll={{ x: 800 }}
-          locale={{
-            emptyText: (
-              <Empty description="还没有咨询记录" image={Empty.PRESENTED_IMAGE_SIMPLE}>
-                <Button type="primary" onClick={() => setCreateOpen(true)}>
-                  发起第一条咨询
-                </Button>
-              </Empty>
-            ),
-          }}
-          pagination={{
-            current: listQuery.data?.meta.page ?? 1,
-            pageSize: 10,
-            total: listQuery.data?.meta.total ?? 0,
-            showSizeChanger: false,
-            onChange: setPage,
-          }}
+        <ResponsiveDataView
+          mobileCards={
+            <MobileConsultationList
+              items={listQuery.data?.items ?? []}
+              loading={listQuery.isLoading}
+              onOpen={(row) => setDetailId(row.id)}
+              onCreate={() => setCreateOpen(true)}
+            />
+          }
+          desktopTable={
+            <Table<ConsultationCase>
+              rowKey="id"
+              size="middle"
+              columns={columns}
+              dataSource={listQuery.data?.items ?? []}
+              loading={listQuery.isLoading}
+              scroll={{ x: 800 }}
+              locale={{
+                emptyText: (
+                  <Empty description="还没有咨询记录" image={Empty.PRESENTED_IMAGE_SIMPLE}>
+                    <Button type="primary" onClick={() => setCreateOpen(true)}>
+                      发起第一条咨询
+                    </Button>
+                  </Empty>
+                ),
+              }}
+              pagination={{
+                current: listQuery.data?.meta.page ?? 1,
+                pageSize: 10,
+                total: listQuery.data?.meta.total ?? 0,
+                showSizeChanger: false,
+                onChange: setPage,
+              }}
+            />
+          }
         />
       </SectionCard>
 

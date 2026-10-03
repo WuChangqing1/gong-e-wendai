@@ -47,7 +47,7 @@
 | POST | `/auth/refresh` | 刷新会话（刷新令牌轮换） |
 | POST | `/auth/logout` | 退出并撤销刷新令牌 |
 
-`admin` 角色不支持自助注册，通过 `scripts/create_admin.py` 创建。
+公开注册只允许经营者与家庭成员；咨询人员**不能**自助注册。
 
 ## 当前用户
 
@@ -213,19 +213,33 @@
 
 文本模型 `glm-4.5-air`，视觉模型 `glm-4.6v`。详见 `docs/glm-integration.md`。
 
-## 系统管理
+## 业务身份与系统运维
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/admin/overview` | 账户 / 商户 / 事项 / 咨询 / 家庭 / 分析结果计数 |
-| GET | `/admin/users` | 用户列表（支持搜索与分页） |
-| POST | `/admin/users` | **创建账户**：咨询人员只能通过这里创建；管理员只能由管理员创建 |
-| POST | `/admin/users/{id}/status` | 启用 / 停用账户 |
-| GET | `/admin/runtime` | 运行状态（数据库可用性、体积、WAL、待重算数、近期异常） |
-| GET | `/admin/audit-logs` | 审计日志 |
+本系统**没有**管理员身份，因此不存在 `/admin/*` 业务接口、用户管理后台与运行状态面板。
+平台级用户管理与运维属于上层系统，不属于本模块。
+
+运维观察点（不进入用户界面）：
+
+| 方式 | 用途 |
+| --- | --- |
+| `GET /health` | 服务与数据库可用性、智能服务是否启用、版本、环境 |
+| `systemctl --user status gong-e-wendai` | 进程状态、重启次数 |
+| `journalctl --user -u gong-e-wendai` | 运行日志与异常 |
+| `scripts/backup_db.py` | 数据库在线备份 |
+
+`/api/v1/admin/*` 未命中时返回 **404 接口不存在**（不是 403）——
+这表明后台确实已被移除，而不是「仍然存在但被拦住」。
 
 ## 注册角色范围
 
 公开注册（`POST /auth/register`）**只允许** `merchant` 与 `family_member`。
-提交 `consultant` 或 `admin` 一律 422。咨询人员由管理员通过 `POST /admin/users`
-开通；管理员由已有管理员或 `scripts/provision_admin.py` 创建。
+提交 `consultant` 一律 422；`admin` 已不是合法业务身份，同样被拒。
+
+咨询人员属于上层银行 / 商户服务 App 的身份，通过安全脚本开通：
+
+```bash
+python scripts/provision_consultant.py --username zixunxiaoli --name 咨询小李
+```
+
+脚本密码随机生成、写入 `0600` 凭据文件、不打印到终端。
+未来可替换为 `UpstreamIdentityProvider` 接入上层身份体系。

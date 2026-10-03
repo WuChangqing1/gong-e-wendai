@@ -9,10 +9,17 @@ import { useMemo } from 'react';
 import type { EChartsOption } from 'echarts';
 
 import ChartFrame from '@/components/charts/ChartFrame';
-import { CHART_COLORS, TOOLTIP_STYLE, yuanAxisLabel } from '@/components/charts/echarts';
+import {
+  CHART_COLORS,
+  MOBILE_AXIS_LABEL,
+  MOBILE_GRID,
+  TOOLTIP_STYLE,
+  yuanAxisLabel,
+} from '@/components/charts/echarts';
+import { useIsMobile } from '@/hooks/useResponsive';
 import type { DailyTerm } from '@/types';
 import { formatCny, formatSigned } from '@/utils/money';
-import { formatChineseDate, formatWeekday } from '@/utils/datetime';
+import { formatChineseDate, formatCompactDay, formatWeekday } from '@/utils/datetime';
 
 export default function DailyFlowChart({
   terms,
@@ -21,16 +28,21 @@ export default function DailyFlowChart({
   terms: DailyTerm[];
   height?: number;
 }) {
+  const isMobile = useIsMobile();
+
   const option = useMemo<EChartsOption>(() => {
-    const labels = terms.map(
-      (item) => `${formatChineseDate(item.day)}\n${formatWeekday(item.day)}`,
+    // 手机端只显示日期（10/3）：窄屏放不下「10月3日 + 周六」两行标签。
+    const labels = terms.map((item) =>
+      isMobile
+        ? formatCompactDay(item.day)
+        : `${formatChineseDate(item.day)}\n${formatWeekday(item.day)}`,
     );
     const inflow = terms.map((item) => item.inflow_cents / 100);
     const outflow = terms.map((item) => item.outflow_cents / 100);
     const net = terms.map((item) => item.net_cents / 100);
 
     return {
-      grid: { left: 8, right: 16, top: 32, bottom: 8, containLabel: true },
+      grid: isMobile ? MOBILE_GRID : { left: 8, right: 16, top: 32, bottom: 8, containLabel: true },
       tooltip: {
         ...TOOLTIP_STYLE,
         formatter: (params: unknown) => {
@@ -47,24 +59,33 @@ export default function DailyFlowChart({
           ].join('<br/>');
         },
       },
-      legend: {
-        top: 0,
-        right: 0,
-        itemWidth: 10,
-        itemHeight: 10,
-        textStyle: { color: '#666', fontSize: 12 },
-        data: ['当日收入', '当日支出', '当日净额'],
-      },
+      // 手机端图例由 ChartFrame 的 footer 承担，避免与坐标轴争抢窄屏空间。
+      legend: isMobile
+        ? { show: false }
+        : {
+            top: 0,
+            right: 0,
+            itemWidth: 10,
+            itemHeight: 10,
+            textStyle: { color: '#666', fontSize: 12 },
+            data: ['当日收入', '当日支出', '当日净额'],
+          },
       xAxis: {
         type: 'category',
         data: labels,
         axisTick: { show: false },
         axisLine: { lineStyle: { color: '#E8E8E8' } },
-        axisLabel: { color: '#999', fontSize: 11, lineHeight: 14 },
+        axisLabel: isMobile
+          ? MOBILE_AXIS_LABEL
+          : { color: '#999', fontSize: 11, lineHeight: 14 },
       },
       yAxis: {
         type: 'value',
-        axisLabel: { color: '#999', fontSize: 11, formatter: yuanAxisLabel },
+        axisLabel: {
+          color: '#999',
+          fontSize: isMobile ? 12 : 11,
+          formatter: yuanAxisLabel,
+        },
         splitLine: { lineStyle: { color: '#F0F0F0' } },
       },
       series: [
@@ -96,7 +117,7 @@ export default function DailyFlowChart({
         },
       ],
     };
-  }, [terms]);
+  }, [terms, isMobile]);
 
   const total = terms.reduce((sum, item) => sum + item.event_count, 0);
 

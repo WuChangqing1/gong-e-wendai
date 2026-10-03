@@ -140,17 +140,115 @@ test.describe('响应式与移动端', () => {
     await expect(page.locator('.gew-auth__form-inner')).toBeVisible();
   });
 
-  test('窄屏下表格容器内部滚动而不撑破页面', async ({ page, request }) => {
+  test('窄屏下事项列表改为卡片且不撑破页面', async ({ page, request }) => {
     const fixture = await createMerchantFixture(request, 'mobiletable');
     await loginViaUi(page, fixture.user.username);
     await clickInBrowser(page.locator('.gew-tabbar'), '现金事件');
     await expect(page.getByRole('heading', { name: '现金事件' })).toBeVisible({ timeout: 25_000 });
-    await expect(page.getByRole('cell', { name: /结算款/ })).toBeVisible({ timeout: 25_000 });
+
+    // V3：手机端不再渲染 980px 宽表格，改为卡片列表（无需横向拖动）。
+    const cardList = page.getByTestId('event-card-list');
+    await expect(cardList).toBeVisible({ timeout: 25_000 });
+    await expect(cardList).toContainText('结算款');
+    // 卡片里必须带金额与操作入口，信息量与表格列一致
+    await expect(cardList).toContainText('¥');
+    await expect(page.locator('.ant-table-wrapper')).toBeHidden();
 
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
     expect(overflow).toBeLessThanOrEqual(1);
     expect(await btn(page, '新增事项').count()).toBeGreaterThan(0);
+  });
+
+  test('「我的」在窄屏是列表项 + 二级进入，而不是横向页签', async ({ page, request }) => {
+    const fixture = await createMerchantFixture(request, 'mobilesettings');
+    await loginViaUi(page, fixture.user.username);
+    await clickInBrowser(page.locator('.gew-tabbar'), '我的');
+    await expect(page).toHaveURL(/\/settings/, { timeout: 25_000 });
+
+    const menu = page.getByTestId('settings-menu');
+    await expect(menu).toBeVisible({ timeout: 25_000 });
+    for (const label of ['个人资料', '经营资料', '家庭设置', '安全设置', '智能服务状态']) {
+      await expect(menu).toContainText(label);
+    }
+    // 窄屏不出现横向页签（V3 第 80 节：用列表项而不是卡片网格）
+    await expect(page.locator('.ant-tabs-nav')).toBeHidden();
+
+    // 进入分组 → 有返回条与分组内容
+    await menu.getByText('安全设置').click();
+    const detail = page.getByTestId('settings-detail');
+    await expect(detail).toBeVisible({ timeout: 15_000 });
+    await expect(detail).toContainText('修改密码');
+    await expect(menu).toBeHidden();
+
+    await page.getByRole('button', { name: '返回设置列表' }).click();
+    await expect(page.getByTestId('settings-menu')).toBeVisible({ timeout: 15_000 });
+
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(1);
+  });
+
+  test('窄屏筛选收进底部抽屉，含重置与确认', async ({ page, request }) => {
+    const fixture = await createMerchantFixture(request, 'mobilefilter');
+    await loginViaUi(page, fixture.user.username);
+    await clickInBrowser(page.locator('.gew-tabbar'), '现金事件');
+    await expect(page.getByRole('heading', { name: '现金事件' })).toBeVisible({ timeout: 25_000 });
+
+    await clickInBrowser(page, '筛选');
+    const sheet = page.locator('.gew-filter-sheet');
+    await expect(sheet).toBeVisible({ timeout: 20_000 });
+    for (const label of ['预计时间区间', '收支方向', '状态', '事项类型']) {
+      await expect(sheet).toContainText(label);
+    }
+    await expect(btn(sheet, '重置').first()).toBeVisible();
+    await expect(btn(sheet, '确认').first()).toBeVisible();
+
+    // 底部抽屉形态，宽度不超过视口
+    const placement = await page.evaluate(
+      () => document.querySelector('.ant-drawer')?.className ?? '',
+    );
+    expect(placement).toContain('ant-drawer-bottom');
+    const box = await page.locator('.ant-drawer-content-wrapper').first().boundingBox();
+    const viewport = page.viewportSize();
+    expect(box?.width ?? 0).toBeLessThanOrEqual((viewport?.width ?? 0) + 1);
+
+    // 选一个条件后确认：抽屉关闭，按钮提示生效条件数
+    await sheet.locator('.ant-select').nth(0).click();
+    await page.getByTitle('收入', { exact: true }).click();
+    await clickInBrowser(sheet, '确认');
+    await expect(btn(page, '筛选 (1)').first()).toBeVisible({ timeout: 15_000 });
+
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(1);
+  });
+
+  test('改变视口不触发新的接口请求', async ({ page, request }) => {
+    const fixture = await createMerchantFixture(request, 'mobileresize');
+    await loginViaUi(page, fixture.user.username);
+
+    const calls: string[] = [];
+    page.on('request', (req) => {
+      if (req.url().includes('/api/v1/') && req.method() === 'GET') calls.push(req.url());
+    });
+
+    for (const route of ['/today', '/events']) {
+      await page.goto(appUrl(route));
+      await page.waitForTimeout(2500);
+      const afterLoad = calls.length;
+      expect(afterLoad, `${route} 首屏应发起过请求`).toBeGreaterThan(0);
+
+      // 连续跨越断点：desktop → tablet → mobile → desktop
+      for (const width of [900, 390, 430, 1440]) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.waitForTimeout(1200);
+      }
+      const added = calls.length - afterLoad;
+      expect(added, `${route} 视口变化后不应新增接口请求（实际新增 ${added} 次）`).toBe(0);
+    }
   });
 });

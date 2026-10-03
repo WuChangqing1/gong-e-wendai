@@ -13,9 +13,13 @@ from app.models.base import Base, TimestampMixin, UTCDateTime
 ROLE_MERCHANT = "merchant"
 ROLE_FAMILY_MEMBER = "family_member"
 ROLE_CONSULTANT = "consultant"
-ROLE_ADMIN = "admin"
 
-ALL_ROLES = (ROLE_MERCHANT, ROLE_FAMILY_MEMBER, ROLE_CONSULTANT, ROLE_ADMIN)
+#: 全部业务身份。它们之间**没有等级关系**，只是不同角色。
+#:
+#: 工 e 稳袋按产品定位是上层银行 / 商户服务 App 中的一个业务模块，
+#: 平台级用户与运维管理由上层系统承担，因此本系统**不存在 admin 身份**，
+#: 也没有对应的用户管理后台、运行状态面板与 /admin API。
+ALL_ROLES = (ROLE_MERCHANT, ROLE_FAMILY_MEMBER, ROLE_CONSULTANT)
 
 
 def new_id() -> str:

@@ -9,10 +9,17 @@ import { useMemo } from 'react';
 import type { EChartsOption } from 'echarts';
 
 import ChartFrame from '@/components/charts/ChartFrame';
-import { CHART_COLORS, TOOLTIP_STYLE, yuanAxisLabel } from '@/components/charts/echarts';
+import {
+  CHART_COLORS,
+  MOBILE_AXIS_LABEL,
+  MOBILE_GRID,
+  TOOLTIP_STYLE,
+  yuanAxisLabel,
+} from '@/components/charts/echarts';
+import { useIsMobile } from '@/hooks/useResponsive';
 import type { DailyTerm } from '@/types';
 import { formatCny, formatSigned } from '@/utils/money';
-import { formatChineseDate, formatWeekday } from '@/utils/datetime';
+import { formatChineseDate, formatCompactDay, formatWeekday } from '@/utils/datetime';
 
 export default function CumulativeFlowChart({
   terms,
@@ -21,6 +28,7 @@ export default function CumulativeFlowChart({
   terms: DailyTerm[];
   height?: number;
 }) {
+  const isMobile = useIsMobile();
   const series = useMemo(() => {
     let cumulativeIn = 0;
     let cumulativeOut = 0;
@@ -38,10 +46,14 @@ export default function CumulativeFlowChart({
   }, [terms]);
 
   const option = useMemo<EChartsOption>(() => {
-    const labels = series.map((item) => `${formatChineseDate(item.day)}\n${formatWeekday(item.day)}`);
+    const labels = series.map((item) =>
+      isMobile
+        ? formatCompactDay(item.day)
+        : `${formatChineseDate(item.day)}\n${formatWeekday(item.day)}`,
+    );
 
     return {
-      grid: { left: 8, right: 16, top: 32, bottom: 8, containLabel: true },
+      grid: isMobile ? MOBILE_GRID : { left: 8, right: 16, top: 32, bottom: 8, containLabel: true },
       tooltip: {
         ...TOOLTIP_STYLE,
         formatter: (params: unknown) => {
@@ -58,25 +70,33 @@ export default function CumulativeFlowChart({
           ].join('<br/>');
         },
       },
-      legend: {
-        top: 0,
-        right: 0,
-        itemWidth: 10,
-        itemHeight: 10,
-        textStyle: { color: '#666', fontSize: 12 },
-        data: ['累计收入', '累计支出', '累计净额'],
-      },
+      legend: isMobile
+        ? { show: false }
+        : {
+            top: 0,
+            right: 0,
+            itemWidth: 10,
+            itemHeight: 10,
+            textStyle: { color: '#666', fontSize: 12 },
+            data: ['累计收入', '累计支出', '累计净额'],
+          },
       xAxis: {
         type: 'category',
         boundaryGap: false,
         data: labels,
         axisTick: { show: false },
         axisLine: { lineStyle: { color: '#E8E8E8' } },
-        axisLabel: { color: '#999', fontSize: 11, lineHeight: 14 },
+        axisLabel: isMobile
+          ? MOBILE_AXIS_LABEL
+          : { color: '#999', fontSize: 11, lineHeight: 14 },
       },
       yAxis: {
         type: 'value',
-        axisLabel: { color: '#999', fontSize: 11, formatter: yuanAxisLabel },
+        axisLabel: {
+          color: '#999',
+          fontSize: isMobile ? 12 : 11,
+          formatter: yuanAxisLabel,
+        },
         splitLine: { lineStyle: { color: '#F0F0F0' } },
       },
       series: [
@@ -113,7 +133,7 @@ export default function CumulativeFlowChart({
         },
       ],
     };
-  }, [series]);
+  }, [series, isMobile]);
 
   const hasData = series.some((item) => item.cumulativeIn !== 0 || item.cumulativeOut !== 0);
 

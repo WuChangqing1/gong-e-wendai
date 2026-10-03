@@ -1,4 +1,4 @@
-/** 一级导航结构（按角色区分）。 */
+/** 一级导航结构（按业务身份区分）。 */
 
 import {
   AppstoreOutlined,
@@ -6,9 +6,7 @@ import {
   BarChartOutlined,
   DashboardOutlined,
   FileTextOutlined,
-  HomeOutlined,
   MessageOutlined,
-  SafetyCertificateOutlined,
   SettingOutlined,
   TeamOutlined,
   UserOutlined,
@@ -25,10 +23,17 @@ export interface NavItem {
   mobile?: boolean;
 }
 
+/**
+ * 经营者导航。
+ *
+ * `mobile: false` 的项只出现在桌面左侧栏：手机底部标签栏最多 5 项，
+ * 情景分析改由「今日决策」页的入口进入（`/analysis` 路由仍然存在，
+ * 手机与桌面使用同一个地址）。
+ */
 export const MERCHANT_NAV: NavItem[] = [
   { key: 'today', path: '/today', label: '今日决策', icon: <DashboardOutlined />, mobile: true },
   { key: 'events', path: '/events', label: '现金事件', icon: <AppstoreOutlined />, mobile: true },
-  { key: 'analysis', path: '/analysis', label: '情景分析', icon: <BarChartOutlined />, mobile: true },
+  { key: 'analysis', path: '/analysis', label: '情景分析', icon: <BarChartOutlined /> },
   { key: 'family', path: '/family', label: '家庭协同', icon: <TeamOutlined />, mobile: true },
   {
     key: 'consultations',
@@ -37,7 +42,7 @@ export const MERCHANT_NAV: NavItem[] = [
     icon: <MessageOutlined />,
     mobile: true,
   },
-  { key: 'settings', path: '/settings', label: '我的', icon: <SettingOutlined /> },
+  { key: 'settings', path: '/settings', label: '我的', icon: <SettingOutlined />, mobile: true },
 ];
 
 export const CONSULTANT_NAV: NavItem[] = [
@@ -46,39 +51,28 @@ export const CONSULTANT_NAV: NavItem[] = [
   { key: 'settings', path: '/settings', label: '我的', icon: <UserOutlined />, mobile: true },
 ];
 
-export const ADMIN_NAV: NavItem[] = [
-  { key: 'overview', path: '/admin', label: '系统概览', icon: <HomeOutlined />, mobile: true },
-  { key: 'users', path: '/admin/users', label: '用户管理', icon: <TeamOutlined />, mobile: true },
-  {
-    key: 'runtime',
-    path: '/admin/runtime',
-    label: '运行状态',
-    icon: <SafetyCertificateOutlined />,
-    mobile: true,
-  },
+/** 家庭成员的两项导航。 */
+export const FAMILY_NAV: NavItem[] = [
+  { key: 'cards', path: '/family/cards', label: '家庭协同', icon: <TeamOutlined />, mobile: true },
+  { key: 'settings', path: '/settings', label: '我的', icon: <SettingOutlined />, mobile: true },
 ];
 
+/**
+ * 按业务身份取导航。
+ *
+ * 三种身份彼此独立、没有等级关系，因此这里只做「身份 → 菜单」的映射，
+ * 不再有「附加管理员入口」这类叠加逻辑。
+ */
 export function navForRoles(roles: Role[]): NavItem[] {
-  // 一个账户可以同时拥有多个角色；导航取"最高业务角色"对应的一套，
-  // 避免同时展示多套菜单造成认知负担。管理员额外可见管理入口。
-  if (roles.includes('merchant')) {
-    const items = [...MERCHANT_NAV];
-    if (roles.includes('admin')) {
-      items.push({ key: 'admin', path: '/admin', label: '系统管理', icon: <SafetyCertificateOutlined /> });
-    }
-    return items;
-  }
+  // 一个账户可以同时拥有多个业务身份；导航取最高业务身份对应的一套，
+  // 避免同时展示多套菜单造成认知负担。
+  if (roles.includes('merchant')) return MERCHANT_NAV;
   if (roles.includes('consultant')) return CONSULTANT_NAV;
-  if (roles.includes('admin')) return ADMIN_NAV;
-  return [
-    { key: 'cards', path: '/family/cards', label: '家庭协同', icon: <TeamOutlined />, mobile: true },
-    { key: 'settings', path: '/settings', label: '我的', icon: <SettingOutlined />, mobile: true },
-  ];
+  return FAMILY_NAV;
 }
 
 export function landingPath(roles: Role[]): string {
   if (roles.includes('merchant')) return '/today';
   if (roles.includes('consultant')) return '/consultant';
-  if (roles.includes('admin')) return '/admin';
   return '/family/cards';
 }

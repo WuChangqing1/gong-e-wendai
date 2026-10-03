@@ -1,6 +1,6 @@
 /** 情景分析页：多情景资金曲线、可提用金额与风险差异对比。 */
 
-import { useMemo, useState } from 'react';
+import { Suspense, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Alert,
@@ -29,8 +29,11 @@ import dayjs, { type Dayjs } from 'dayjs';
 import { analysisApi, cashEventApi, scenarioApi } from '@/api/cashflow';
 import { errorMessage } from '@/api/client';
 import { queryKeys } from '@/api/queryClient';
-import AnalysisChartsPanel from '@/features/analysis/AnalysisChartsPanel';
-import CashflowChart from '@/components/CashflowChart';
+import {
+  AnalysisChartsPanelLazy,
+  CashflowChartLazy,
+  ChartLoading,
+} from '@/components/charts/lazy';
 import { InlineNote, MetricCard, PageHeader, SectionCard, StatusTag } from '@/components/ui';
 import ShareCardDrawer from '@/features/household/ShareCardDrawer';
 import type { AnalysisMode, AnalysisResult, AnalysisStatus, CashEvent } from '@/types';
@@ -233,19 +236,42 @@ export default function AnalysisPage() {
 
       {mode === 'delayed' || mode === 'joint' ? (
         <SectionCard flat bodyClassName="gew-card__body--tight">
-          <Space wrap align="center">
-            <span style={{ color: 'var(--text-secondary)' }}>假设收款推迟天数</span>
-            <InputNumber
-              min={1}
-              max={30}
-              value={delayDays}
-              onChange={(value) => setDelayDays(Number(value ?? 3))}
-              addonAfter="天"
-            />
-            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-              共同约束模式下，系统分别计算按时到账与延迟到账，并取两者中最保守的可提用上限。
-            </span>
-          </Space>
+          <div className="gew-delay-row">
+            <span style={{ color: 'var(--text-secondary)' }}>如果收款推迟</span>
+            {/* 步进器比数字输入框更适合手机：大按钮、无需键盘。 */}
+            <div className="gew-stepper">
+              <Button
+                aria-label="减少一天"
+                disabled={delayDays <= 1}
+                onClick={() => setDelayDays((value) => Math.max(1, value - 1))}
+              >
+                −
+              </Button>
+              <span className="gew-stepper__value num">{delayDays} 天</span>
+              <Button
+                aria-label="增加一天"
+                disabled={delayDays >= 30}
+                onClick={() => setDelayDays((value) => Math.min(30, value + 1))}
+              >
+                +
+              </Button>
+            </div>
+            <Space size={4} wrap>
+              {[1, 2, 3, 7].map((day) => (
+                <Button
+                  key={day}
+                  size="small"
+                  type={delayDays === day ? 'primary' : 'default'}
+                  onClick={() => setDelayDays(day)}
+                >
+                  {day} 天
+                </Button>
+              ))}
+            </Space>
+          </div>
+          <div className="gew-delay-row__hint">
+            共同约束模式下，系统分别计算按时到账与延迟到账，并取两者中最保守的可提用上限。
+          </div>
         </SectionCard>
       ) : null}
 
@@ -292,12 +318,17 @@ export default function AnalysisPage() {
             {curves.length === 0 ? (
               <Empty description="没有可展示的情景曲线" image={Empty.PRESENTED_IMAGE_SIMPLE} />
             ) : (
-              <CashflowChart scenarios={curves} bufferCents={result.buffer_cents} />
+              // 图表 chunk 按需加载；Suspense 只包住图表本身，不阻塞页面其余部分
+              <Suspense fallback={<ChartLoading height={300} />}>
+                <CashflowChartLazy scenarios={curves} bufferCents={result.buffer_cents} />
+              </Suspense>
             )}
           </SectionCard>
 
           {/* 图表化分析：每日收支、收支结构、余额变化过程、资金积累节奏、到账分布、情景对比 */}
-          <AnalysisChartsPanel analysis={result} />
+          <Suspense fallback={<ChartLoading height={520} />}>
+            <AnalysisChartsPanelLazy analysis={result} />
+          </Suspense>
 
           <SectionCard title="情景对比明细">
             <Table
@@ -556,7 +587,13 @@ export default function AnalysisPage() {
             label="假设金额（元，选填）"
             extra="留空表示金额不变，只调整时间。"
           >
-            <InputNumber min={0} precision={2} style={{ width: '100%' }} addonBefore="¥" />
+            <InputNumber
+              min={0}
+              precision={2}
+              style={{ width: '100%' }}
+              addonBefore="¥"
+              inputMode="decimal"
+            />
           </Form.Item>
           <Form.Item name="description" label="说明（选填）">
             <Input placeholder="例如：客户说月底才能结清" />

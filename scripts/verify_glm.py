@@ -23,30 +23,40 @@ sys.path.insert(0, str(BACKEND_DIR))
 
 
 def read_secret() -> str:
-    """读取密钥。只检查是否存在，不输出内容。"""
-    for scope in ("process", "machine", "user"):
-        if scope == "process":
-            value = os.environ.get("GLM", "")
-        else:
-            if os.name != "nt":
-                continue
-            import winreg  # noqa: PLC0415
+    """读取密钥。只检查是否存在，不输出内容。
 
-            root = (
-                winreg.HKEY_CURRENT_USER if scope == "user" else winreg.HKEY_LOCAL_MACHINE
-            )
-            sub = (
-                r"Environment"
-                if scope == "machine"
-                else r"Environment"
-            )
-            try:
-                with winreg.OpenKey(root, sub) as key:
-                    value, _ = winreg.QueryValueEx(key, "GLM")
-            except OSError:
-                value = ""
-        if value:
-            return str(value).strip()
+    查找顺序：进程环境变量 → Windows 机器级 → Windows 用户级。
+
+    Windows 的**机器级**环境变量存放在
+    ``HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment``，
+    而不是 ``HKLM\\Environment``（后者是 XP 时代的遗留位置，现代系统上为空）。
+    读错位置会让「系统环境变量里明明设置了 GLM」被判成不存在。
+    """
+    value = os.environ.get("GLM", "")
+    if value:
+        return str(value).strip()
+
+    if os.name != "nt":
+        return ""
+
+    import winreg  # noqa: PLC0415
+
+    machine = (
+        r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"
+    )
+    candidates = (
+        (winreg.HKEY_LOCAL_MACHINE, machine),
+        (winreg.HKEY_LOCAL_MACHINE, r"Environment"),  # 兼容旧位置
+        (winreg.HKEY_CURRENT_USER, r"Environment"),
+    )
+    for root, sub in candidates:
+        try:
+            with winreg.OpenKey(root, sub) as key:
+                found, _ = winreg.QueryValueEx(key, "GLM")
+        except OSError:
+            continue
+        if found:
+            return str(found).strip()
     return ""
 
 
