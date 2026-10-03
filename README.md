@@ -226,7 +226,7 @@ cd D:\CodingData\Github\GongHangCup\gong-e-wendai\frontend
 npm run test          # Vitest（37 项）
 npm run lint          # ESLint（--max-warnings 0）
 npm run typecheck     # TypeScript strict
-npm run test:e2e      # Playwright（39 项，需先启动前后端）
+npm run test:e2e      # Playwright（41 项，需先启动前后端）
 ```
 
 端到端测试默认指向 `http://127.0.0.1:8000`（同源单端口生产形态），

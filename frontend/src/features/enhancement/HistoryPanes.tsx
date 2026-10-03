@@ -558,6 +558,7 @@ export function SettlementPane() {
             placeholder="手动补录：结算款金额（元）"
             min={0}
             precision={2}
+            inputMode="decimal"
             onChange={(value) => setManualKey(value === null ? '' : String(value))}
           />
           <Button

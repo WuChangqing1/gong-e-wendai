@@ -223,6 +223,8 @@ export default function EventFormDrawer({
               size="large"
               placeholder="0.00"
               addonBefore="¥"
+              // 手机端弹出带小数点的数字键盘，而不是全键盘
+              inputMode="decimal"
               // 金额一律为整数分，这里阻止负号与非法字符进入输入
               onKeyDown={(event) => {
                 if (['-', 'e', 'E', '+'].includes(event.key)) event.preventDefault();
@@ -290,7 +292,12 @@ export default function EventFormDrawer({
             label="同一时刻的处理次序（选填）"
             extra="同一时间存在多笔事项且没有指定次序时，系统先处理支出再处理收入，以暴露中途可能出现的资金缺口。"
           >
-            <InputNumber min={0} style={{ width: '100%' }} placeholder="数字越小越先处理" />
+            <InputNumber
+              min={0}
+              style={{ width: '100%' }}
+              placeholder="数字越小越先处理"
+              inputMode="numeric"
+            />
           </Form.Item>
 
           {isEdit ? <Alert type="info" showIcon message={MATERIAL_HINT} /> : null}

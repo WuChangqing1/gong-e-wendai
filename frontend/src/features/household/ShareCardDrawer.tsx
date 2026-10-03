@@ -197,6 +197,7 @@ export default function ShareCardDrawer({
                 value={plannedAmount}
                 onChange={(value) => setPlannedAmount(value ?? null)}
                 style={{ width: '100%' }}
+                inputMode="decimal"
               />
             </div>
             <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-muted)' }}>

@@ -192,7 +192,7 @@ export default function SettingsPage() {
                 <Input />
               </Form.Item>
               <Form.Item name="phone" label="手机号">
-                <Input placeholder="选填" />
+                <Input placeholder="选填" inputMode="tel" />
               </Form.Item>
               <Form.Item name="email" label="邮箱">
                 <Input placeholder="选填" />
@@ -266,7 +266,7 @@ export default function SettingsPage() {
                 <Input />
               </Form.Item>
               <Form.Item name="phone_optional" label="经营联系电话">
-                <Input placeholder="选填" />
+                <Input placeholder="选填" inputMode="tel" />
               </Form.Item>
               <Form.Item name="account_name" label="核心经营收款账户名称">
                 <Input placeholder="例如：经营收款账户" />
@@ -305,7 +305,7 @@ export default function SettingsPage() {
               extra="只填写已经到账、可以立即动用的金额。"
               rules={[{ required: true, message: '请输入当前可用经营资金' }]}
             >
-              <InputNumber min={0} precision={2} style={{ width: '100%' }} />
+              <InputNumber min={0} precision={2} style={{ width: '100%' }} inputMode="decimal" />
             </Form.Item>
             <Form.Item
               name="buffer"
@@ -313,7 +313,7 @@ export default function SettingsPage() {
               extra="系统在计算可提用金额时，会保证未来 7 天任何时点的余额都不低于该金额。"
               rules={[{ required: true, message: '请输入经营留底金额' }]}
             >
-              <InputNumber min={0} precision={2} style={{ width: '100%' }} />
+              <InputNumber min={0} precision={2} style={{ width: '100%' }} inputMode="decimal" />
             </Form.Item>
             <Button type="primary" htmlType="submit" loading={bufferMutation.isPending}>
               保存并重新计算

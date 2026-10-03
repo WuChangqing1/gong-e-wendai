@@ -579,7 +579,13 @@ export default function AnalysisPage() {
             label="假设金额（元，选填）"
             extra="留空表示金额不变，只调整时间。"
           >
-            <InputNumber min={0} precision={2} style={{ width: '100%' }} addonBefore="¥" />
+            <InputNumber
+              min={0}
+              precision={2}
+              style={{ width: '100%' }}
+              addonBefore="¥"
+              inputMode="decimal"
+            />
           </Form.Item>
           <Form.Item name="description" label="说明（选填）">
             <Input placeholder="例如：客户说月底才能结清" />

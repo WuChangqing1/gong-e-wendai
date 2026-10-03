@@ -618,7 +618,13 @@ export default function TodayPage() {
             extra="只填写已经到账、可以立即动用的金额，待结算资金不要计入。"
             rules={[{ required: true, message: '请输入当前可用经营资金' }]}
           >
-            <InputNumber min={0} precision={2} style={{ width: '100%' }} size="large" />
+            <InputNumber
+              min={0}
+              precision={2}
+              style={{ width: '100%' }}
+              size="large"
+              inputMode="decimal"
+            />
           </Form.Item>
           <Form.Item
             name="buffer"
@@ -626,7 +632,13 @@ export default function TodayPage() {
             extra="你希望始终保留在经营账户中的金额，用于覆盖临时采购、找零与突发支出。"
             rules={[{ required: true, message: '请输入经营留底金额' }]}
           >
-            <InputNumber min={0} precision={2} style={{ width: '100%' }} size="large" />
+            <InputNumber
+              min={0}
+              precision={2}
+              style={{ width: '100%' }}
+              size="large"
+              inputMode="decimal"
+            />
           </Form.Item>
         </Form>
       </Modal>
