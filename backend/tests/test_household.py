@@ -327,6 +327,7 @@ class TestCards:
         assert response.status_code == 422
 
     def test_risk_card_contains_gap(self, family):
+        """缺口金额必须显式勾选「付款缺口」，不再由「风险摘要」隐式带出。"""
         analysis = family["client"].post(
             "/api/v1/analysis/run", json={"mode": "delayed", "delay_days": 2}
         ).json()
@@ -334,27 +335,86 @@ class TestCards:
             "/api/v1/household-cards",
             json={
                 "card_type": "risk",
-                "shared_fields": ["risk_summary", "limiting_point"],
+                "shared_fields": ["risk_summary", "limiting_point", "payment_gap"],
                 "analysis_result_id": analysis["id"],
             },
         ).json()
         assert card["payload"]["payment_gap_cents"] == 200_00
         assert "缺口" in card["payload"]["risk_summary"]
 
+    def test_risk_summary_alone_does_not_leak_gap_amounts(self, family):
+        """只勾「风险摘要」时，缺口与余额一律不出现（最小披露）。"""
+        analysis = family["client"].post(
+            "/api/v1/analysis/run", json={"mode": "delayed", "delay_days": 2}
+        ).json()
+        card = family["client"].post(
+            "/api/v1/household-cards",
+            json={
+                "card_type": "risk",
+                "shared_fields": ["risk_summary"],
+                "analysis_result_id": analysis["id"],
+            },
+        ).json()
+        payload = card["payload"]
+        assert "risk_summary" in payload
+        for leaked in (
+            "payment_gap_cents",
+            "buffer_gap_cents",
+            "buffer_cents",
+            "limiting_balance_cents",
+            "end_balance_cents",
+            "limiting_timestamp",
+        ):
+            assert leaked not in payload, leaked
+
+    def test_limiting_point_does_not_bring_balance(self, family):
+        """勾「最紧张时间」只给出时间，不给出余额或期末余额。"""
+        analysis = family["client"].post(
+            "/api/v1/analysis/run", json={"mode": "current_plan"}
+        ).json()
+        card = family["client"].post(
+            "/api/v1/household-cards",
+            json={
+                "card_type": "decision",
+                "shared_fields": ["limiting_point"],
+                "analysis_result_id": analysis["id"],
+            },
+        ).json()
+        payload = card["payload"]
+        assert "limiting_timestamp" in payload
+        assert "limiting_balance_cents" not in payload
+        assert "end_balance_cents" not in payload
+
     def test_revision_card_links_event(self, family):
+        """变更卡可以关联事项，但未勾选事项字段时不带出任何事项细节。"""
         event_id = family["client"].get("/api/v1/cash-events").json()["items"][0]["id"]
         card = family["client"].post(
             "/api/v1/household-cards",
             json={
                 "card_type": "revision",
-                # 事项级字段必须显式勾选才会进入 payload
+                # 变更摘要只表示「有一笔事项变更过」，不含事项细节
                 "shared_fields": ["revision_summary"],
                 "cash_event_id": event_id,
             },
         ).json()
         assert card["card_type"] == "revision"
         assert card["cash_event_id"] == event_id
+        for leaked in ("event_title", "event_amount_cents", "event_scheduled_at", "event_version"):
+            assert leaked not in card["payload"], leaked
+
+    def test_revision_card_with_key_payments_carries_event_detail(self, family):
+        """只有勾选「关键经营付款」才允许带出事项级字段。"""
+        event_id = family["client"].get("/api/v1/cash-events").json()["items"][0]["id"]
+        card = family["client"].post(
+            "/api/v1/household-cards",
+            json={
+                "card_type": "revision",
+                "shared_fields": ["key_payments"],
+                "cash_event_id": event_id,
+            },
+        ).json()
         assert card["payload"]["event_version"] == 1
+        assert card["payload"]["event_title"]
 
     def test_revision_card_without_event_fields_hides_them(self, family):
         """未勾选事项字段时，事项级内容不得出现在 payload 或标题里。"""

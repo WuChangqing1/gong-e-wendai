@@ -192,13 +192,38 @@ class TestHouseholdShareWhitelist:
         assert "已确认退款" not in body["title"]
         assert "event_title" not in body["payload"]
 
-    def test_revision_summary_requires_explicit_selection(self, household_fixture):
+    def test_revision_summary_does_not_carry_event_detail(self, household_fixture):
+        """变更摘要只表示「有一笔事项变更过」，不带出事项名称 / 金额 / 版本。
+
+        这些属于事项细节，只允许通过「关键经营付款」明确勾选后出现。
+        """
         merchant, _, household, _, event_ids = household_fixture
         card = merchant.post(
             "/api/v1/household-cards",
             json={
                 "card_type": "revision",
                 "shared_fields": ["revision_summary"],
+                "cash_event_id": event_ids["API-REFUND-0001"],
+            },
+        )
+        assert card.status_code == 201, card.text
+        payload = card.json()["payload"]
+        for leaked in (
+            "event_title",
+            "event_amount_cents",
+            "event_scheduled_at",
+            "event_version",
+        ):
+            assert leaked not in payload, leaked
+
+    def test_key_payments_is_the_only_gate_for_event_detail(self, household_fixture):
+        """勾选「关键经营付款」后，事项级字段才允许出现。"""
+        merchant, _, household, _, event_ids = household_fixture
+        card = merchant.post(
+            "/api/v1/household-cards",
+            json={
+                "card_type": "revision",
+                "shared_fields": ["key_payments"],
                 "cash_event_id": event_ids["API-REFUND-0001"],
             },
         )
