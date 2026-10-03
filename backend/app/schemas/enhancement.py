@@ -282,12 +282,18 @@ class ReserveConfirmRequest(BaseModel):
     """确认采用建议留底。
 
     客户端必须回传生成建议时的依据版本，任一不一致都返回 409。
+
+    ``run_id`` 指向生成这条建议的 ``EnhancementRun``。服务端**必须**从这条
+    运行记录里读回当时的计算参数（延后天数、分位数、渠道、期初时点）后重新校验，
+    否则用默认参数重算会得到另一个 ``basis_hash``，导致用户永远无法确认
+    非默认参数下看到的建议。
     """
 
     suggested_reserve_cents: int = Field(ge=0)
     basis_hash: str = Field(min_length=8, max_length=64)
     ledger_revision: int = Field(ge=0)
     history_revision: int = Field(ge=0)
+    run_id: str | None = Field(default=None, max_length=36)
 
 
 class ReserveConfirmOut(BaseModel):

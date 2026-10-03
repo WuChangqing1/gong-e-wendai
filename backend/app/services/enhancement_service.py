@@ -14,7 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Sequence
 
 from sqlalchemy import select, update
@@ -104,6 +104,9 @@ class EnhancementBundle:
     ledger_revision: int
     history_revision: int
     basis_hash: str
+    #: 本次计算的期初时点。确认留底时必须用它复算，否则默认时点会算出另一个
+    #: ``basis_hash``，让用户永远无法确认自己看到的建议。
+    reference_at: datetime
 
 
 def _hash_payload(payload: Any) -> str:
@@ -444,6 +447,7 @@ class EnhancementService:
             ledger_revision=state.ledger_revision,
             history_revision=state.history_revision,
             basis_hash=_hash_payload(basis),
+            reference_at=reference,
         )
 
     # ------------------------------------------------------------------
@@ -761,10 +765,12 @@ class EnhancementService:
 
         parameters = {
             **DEFAULT_PARAMETERS,
+            "reference_at": bundle.reference_at.isoformat(),
             "delay_days": delay_days,
             "delay_quantile": delay_quantile,
             "reserve_quantile": reserve_quantile,
             "reserve_rounding_cents": reserve_rounding_cents,
+            "settlement_channel": settlement_channel,
         }
         result_payload = {
             "baseline": {
@@ -847,6 +853,60 @@ class EnhancementService:
     # ------------------------------------------------------------------
     # 留底确认
     # ------------------------------------------------------------------
+    def _parameters_for_confirm(
+        self, merchant_id: str, run_id: str | None
+    ) -> dict[str, Any]:
+        """读回生成建议时的计算参数。
+
+        历史的做法是用**默认参数**重算一遍再比对 ``basis_hash``：只要用户当时
+        用了非默认参数（例如 ``delay_days=3``），重算结果的 basis 与提交值不同，
+        确认就会稳定返回 409 —— 用户看到了建议却永远无法确认。
+
+        这里从 ``EnhancementRun.parameters_json`` 读回原始参数，用它复算，
+        因此「看到的建议」与「确认时的依据」来自同一组参数。
+        """
+        fallback: dict[str, Any] = {
+            "reference_at": None,
+            "delay_days": DEFAULT_MANUAL_DELAY_DAYS,
+            "delay_quantile": DEFAULT_DELAY_QUANTILE,
+            "reserve_quantile": DEFAULT_RESERVE_QUANTILE,
+            "reserve_rounding_cents": DEFAULT_ROUNDING_CENTS,
+            "settlement_channel": None,
+        }
+        if not run_id:
+            return fallback
+
+        run = self.db.get(EnhancementRun, run_id)
+        if run is None or run.merchant_id != merchant_id:
+            # 找不到对应运行时不做猜测：让上层用默认参数复算，
+            # 版本不一致自然会以 409 STALE_RESERVE_ADVICE 拒绝确认。
+            return fallback
+
+        stored = run.parameters_json or {}
+        reference_raw = stored.get("reference_at")
+        reference_at: datetime | None = None
+        if isinstance(reference_raw, str):
+            try:
+                reference_at = datetime.fromisoformat(reference_raw)
+            except ValueError:
+                reference_at = None
+
+        def _number(key: str, default: Any) -> Any:
+            value = stored.get(key, default)
+            return default if value is None else value
+
+        return {
+            "reference_at": reference_at,
+            "delay_days": int(_number("delay_days", DEFAULT_MANUAL_DELAY_DAYS)),
+            "delay_quantile": float(_number("delay_quantile", DEFAULT_DELAY_QUANTILE)),
+            "reserve_quantile": float(_number("reserve_quantile", DEFAULT_RESERVE_QUANTILE)),
+            "reserve_rounding_cents": int(
+                _number("reserve_rounding_cents", DEFAULT_ROUNDING_CENTS)
+            ),
+            "settlement_channel": stored.get("settlement_channel"),
+            "run_id": run.id,
+        }
+
     def confirm_reserve(
         self,
         profile: MerchantProfile,
@@ -856,13 +916,24 @@ class EnhancementService:
         ledger_revision: int,
         history_revision: int,
         actor_id: str,
+        run_id: str | None = None,
     ) -> ReserveConfirmOut:
         """确认采用建议留底。
 
-        后端必须重新校验版本与依据；任一变化返回 409 ``STALE_RESERVE_ADVICE``。
-        绝不自动降低当前留底。
+        用**生成建议时的参数**复算并校验版本与依据；任一变化返回 409
+        ``STALE_RESERVE_ADVICE``。绝不自动降低当前留底。
         """
-        current = self.overview(profile, persist=False)
+        params = self._parameters_for_confirm(profile.id, run_id)
+        current = self.overview(
+            profile,
+            reference_at=params["reference_at"],
+            delay_days=params["delay_days"],
+            delay_quantile=params["delay_quantile"],
+            reserve_quantile=params["reserve_quantile"],
+            reserve_rounding_cents=params["reserve_rounding_cents"],
+            settlement_channel=params["settlement_channel"],
+            persist=False,
+        )
         # 先判断依据是否过期：版本或 basis 变化时，连「建议值是多少」都已经不可信，
         # 必须要求用户重新查看，而不是拿旧建议和新依据比较。
         if (

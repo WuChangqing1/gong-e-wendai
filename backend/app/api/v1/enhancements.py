@@ -471,6 +471,7 @@ def confirm_reserve(
         ledger_revision=payload.ledger_revision,
         history_revision=payload.history_revision,
         actor_id=user.id,
+        run_id=payload.run_id,
     )
     AuditService(db).record(
         "enhancement.reserve_confirmed",

@@ -264,6 +264,9 @@ function ReserveBlock({
         basis_hash: overview.basis_hash,
         ledger_revision: overview.ledger_revision,
         history_revision: overview.history_revision,
+        // 回传生成这条建议的运行 id：服务端要用它读回原计算参数复算，
+        // 否则非默认参数（如延后天数 3）下看到的建议永远无法确认。
+        run_id: overview.run_id,
       }),
     onSuccess: (result) => {
       message.success(result.message);
