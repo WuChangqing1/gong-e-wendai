@@ -57,7 +57,10 @@ class AnalysisResultOut(BaseModel):
     status: str
     status_label: str
     max_withdrawable_cents: int | None = None
+    #: 绑定情景标签与下标：顶层所有字段都来自这个情景。
+    #: 共同约束模式下它可能不是第一个情景（按当前计划）。
     binding_label: str | None = None
+    binding_scenario_index: int | None = None
     opening_balance_cents: int
     buffer_cents: int
     currency: str

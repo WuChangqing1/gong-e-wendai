@@ -41,7 +41,9 @@ from app.services.cash_engine import (
     EngineInput,
     EngineResult,
     JointResult,
+    ResolvedAnalysis,
     events_version_hash,
+    resolve_analysis,
     run_engine,
     run_joint,
 )
@@ -298,41 +300,45 @@ class AnalysisService:
         if payload.mode == MODE_JOINT:
             joint: JointResult = run_joint(inputs)
             results = joint.scenario_results
-            max_withdrawable = joint.max_withdrawable_cents
-            binding_label = joint.binding_label
-            status = joint.status
         else:
+            joint = None
             results = [run_engine(item) for item in inputs]
-            max_withdrawable = results[0].max_withdrawable_cents
-            binding_label = results[0].label
-            status = results[0].status
 
-        primary = results[0]
+        # 唯一权威结果：API 输出、数据库落库与家庭分享全部从它派生。
+        resolved = resolve_analysis(mode=payload.mode, engine_results=results, joint=joint)
+
         payload_dict = {
             "mode": payload.mode,
-            "max_withdrawable_cents": max_withdrawable,
-            "binding_label": binding_label,
-            "limiting_event_title": primary.limiting_event_title,
+            "max_withdrawable_cents": resolved.max_withdrawable_cents,
+            "binding_label": resolved.binding_label,
+            "binding_scenario_index": resolved.binding_scenario_index,
+            "limiting_event_title": resolved.limiting_event_title,
+            "payment_gap_cents": resolved.payment_gap_cents,
+            "buffer_gap_cents": resolved.buffer_gap_cents,
             "scenarios": [item.to_dict() for item in results],
         }
 
         persisted: AnalysisResult | None = None
         if persist:
-            persisted = self._persist(profile, primary, payload, payload_dict, actor_id)
+            persisted = self._persist(profile, resolved, payload, payload_dict, actor_id)
 
-        return self._to_out(
-            profile, results, payload, max_withdrawable, binding_label, status, persisted
-        )
+        return self._to_out(profile, results, payload, resolved, persisted)
 
 
     def _persist(
         self,
         profile: MerchantProfile,
-        primary: EngineResult,
+        resolved: ResolvedAnalysis,
         payload: AnalysisRunRequest,
         payload_dict: dict,
         actor_id: str | None,
     ) -> AnalysisResult:
+        """落库 ``ResolvedAnalysis``。
+
+        共同约束模式下**不能**保存 ``scenarios[0]`` 或 ``primary``：
+        那会把「按当前计划」的状态与缺口写进结果，而用户看到的共同结论可能来自
+        另一个情景。这里保存的每个字段都来自 :func:`resolve_analysis` 选定的绑定情景。
+        """
         from app.repositories.merchant_repo import AccountSnapshotRepository
 
         self.mark_stale(profile.id, reason="已生成新的分析结果", commit=False)
@@ -344,17 +350,17 @@ class AnalysisService:
             scenario_id=None,
             scenario_ids=list(payload.scenario_ids or []),
             mode=payload.mode,
-            status=str(primary.status),
-            max_withdrawable_cents=primary.max_withdrawable_cents,
-            opening_balance_cents=primary.opening_balance_cents,
-            buffer_cents=primary.buffer_cents,
-            snapshot_at=primary.snapshot_at,
-            window_end_at=primary.window_end_at,
-            limiting_timestamp=primary.limiting_timestamp,
-            limiting_balance_cents=primary.limiting_balance_cents,
-            limiting_event_id=primary.limiting_event_id,
-            payment_gap_cents=primary.payment_gap_cents,
-            buffer_gap_cents=primary.buffer_gap_cents,
+            status=str(resolved.status),
+            max_withdrawable_cents=resolved.max_withdrawable_cents,
+            opening_balance_cents=resolved.opening_balance_cents,
+            buffer_cents=resolved.buffer_cents,
+            snapshot_at=resolved.snapshot_at,
+            window_end_at=resolved.window_end_at,
+            limiting_timestamp=resolved.limiting_timestamp,
+            limiting_balance_cents=resolved.limiting_balance_cents,
+            limiting_event_id=resolved.limiting_event_id,
+            payment_gap_cents=resolved.payment_gap_cents,
+            buffer_gap_cents=resolved.buffer_gap_cents,
             payload=payload_dict,
             events_version_hash=self._version_hash(profile.id),
             is_stale=False,
@@ -552,56 +558,15 @@ class AnalysisService:
         profile: MerchantProfile,
         results: list[EngineResult],
         payload: AnalysisRunRequest,
-        max_withdrawable: int | None,
-        binding_label: str | None,
-        status: AnalysisStatus,
+        resolved: ResolvedAnalysis,
         persisted: AnalysisResult | None,
     ) -> AnalysisResultOut:
-        primary = results[0]
-        # 顶层字段必须与顶层状态一致。
-        #
-        # 共同约束模式下 status 取的是「所有情景中最保守的那个」，而 primary 只是
-        # 第一个情景（按当前计划）。如果直接复用 primary 的缺口与文案，就会出现
-        # 「状态=存在付款缺口，缺口金额=0，文案=资金安排可行」这种自相矛盾的组合。
-        # 因此共同约束模式的缺口取所有情景中最紧张的那个，文案取状态对应的文案。
-        if status is primary.status:
-            status_label = primary.status_label
-            payment_gap = primary.payment_gap_cents
-            buffer_gap = primary.buffer_gap_cents
-            limiting_timestamp = primary.limiting_timestamp
-            limiting_balance = primary.limiting_balance_cents
-            limiting_event_id = primary.limiting_event_id
-            limiting_event_title = primary.limiting_event_title
-            limiting_reason = primary.limiting_reason
-            minimum_balance = primary.minimum_balance_cents
-        else:
-            binding = next(
-                (item for item in results if item.status is status),
-                primary,
-            )
-            status_label = STATUS_LABELS[status]
-            payment_gap = max((item.payment_gap_cents for item in results), default=0)
-            buffer_gap = max((item.buffer_gap_cents for item in results), default=0)
-            limiting_timestamp = binding.limiting_timestamp
-            limiting_balance = binding.limiting_balance_cents
-            limiting_event_id = binding.limiting_event_id
-            limiting_event_title = binding.limiting_event_title
-            limiting_reason = binding.limiting_reason
-            minimum_balance = min(
-                (item.minimum_balance_cents for item in results), default=primary.minimum_balance_cents
-            )
-            if status is AnalysisStatus.PAYMENT_GAP:
-                limiting_reason = (
-                    "同时考虑这些情况后，至少一个情景即使不提用家庭资金，仍然存在付款缺口；"
-                    "可提用金额为 0 只表示没有安全金额，不代表资金安排可行。"
-                )
-            elif status is AnalysisStatus.BELOW_BUFFER:
-                limiting_reason = (
-                    "同时考虑这些情况后，至少一个情景会低于你设置的经营留底，当前不建议提用家庭资金。"
-                )
-            elif status is AnalysisStatus.INPUT_INCOMPLETE:
-                limiting_reason = "部分情景的收付款资料尚未确认，暂时无法给出共同结果。"
+        """把唯一权威结果渲染为 API 输出。
 
+        这里**不再**自行判断状态或重新计算缺口：所有标量字段直接取
+        ``resolved``，它已经绑定到同一个情景。此前的实现会在状态不一致时
+        用「各情景最大缺口」重新拼装，导致 API 输出与落库结果不是同一份数据。
+        """
         curves = [
             ScenarioCurve(
                 label=item.label,
@@ -630,36 +595,37 @@ class AnalysisService:
             merchant_id=profile.id,
             mode=payload.mode,
             mode_label=_scenario_kind_label(payload.mode),
-            status=str(status),
-            status_label=status_label,
-            max_withdrawable_cents=max_withdrawable,
-            binding_label=binding_label,
-            opening_balance_cents=primary.opening_balance_cents,
-            buffer_cents=primary.buffer_cents,
+            status=str(resolved.status),
+            status_label=resolved.status_label,
+            max_withdrawable_cents=resolved.max_withdrawable_cents,
+            binding_label=resolved.binding_label,
+            binding_scenario_index=resolved.binding_scenario_index,
+            opening_balance_cents=resolved.opening_balance_cents,
+            buffer_cents=resolved.buffer_cents,
             currency=profile.default_currency,
-            snapshot_at=primary.snapshot_at,
-            window_end_at=primary.window_end_at,
-            limiting_timestamp=limiting_timestamp,
-            limiting_balance_cents=limiting_balance,
-            limiting_event_id=limiting_event_id,
-            limiting_event_title=limiting_event_title,
-            limiting_reason=limiting_reason,
+            snapshot_at=resolved.snapshot_at,
+            window_end_at=resolved.window_end_at,
+            limiting_timestamp=resolved.limiting_timestamp,
+            limiting_balance_cents=resolved.limiting_balance_cents,
+            limiting_event_id=resolved.limiting_event_id,
+            limiting_event_title=resolved.limiting_event_title,
+            limiting_reason=resolved.limiting_reason,
             pending_inflows_at_limit=[
-                item.to_dict() for item in primary.pending_inflows_at_limit
+                item.to_dict() for item in resolved.pending_inflows_at_limit
             ],
-            payment_gap_cents=payment_gap,
-            buffer_gap_cents=buffer_gap,
-            minimum_balance_cents=minimum_balance,
-            balance_floor_cents=minimum_balance,
-            end_balance_cents=primary.end_balance_cents,
-            opening_covers_buffer=primary.opening_covers_buffer,
-            window_inflow_cents=primary.window_inflow_cents,
-            window_outflow_cents=primary.window_outflow_cents,
-            pending_settlement_cents=primary.pending_settlement_cents,
+            payment_gap_cents=resolved.payment_gap_cents,
+            buffer_gap_cents=resolved.buffer_gap_cents,
+            minimum_balance_cents=resolved.minimum_balance_cents,
+            balance_floor_cents=resolved.minimum_balance_cents,
+            end_balance_cents=resolved.end_balance_cents,
+            opening_covers_buffer=resolved.opening_covers_buffer,
+            window_inflow_cents=resolved.window_inflow_cents,
+            window_outflow_cents=resolved.window_outflow_cents,
+            pending_settlement_cents=resolved.pending_settlement_cents,
             scenarios=curves,
-            points=[point.to_dict() for point in primary.points],
-            validation_errors=primary.validation_errors,
-            excluded_event_ids=primary.excluded_event_ids,
+            points=[point.to_dict() for point in resolved.points],
+            validation_errors=resolved.validation_errors,
+            excluded_event_ids=resolved.excluded_event_ids,
             engine_version=ENGINE_VERSION,
             is_stale=False,
             generated_at=utcnow(),
