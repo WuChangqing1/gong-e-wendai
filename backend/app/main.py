@@ -150,6 +150,22 @@ def _detect_asset_prefix(index_file_path) -> str:  # noqa: ANN001
     return prefix.rstrip("/")
 
 
+class _ImmutableStaticFiles(StaticFiles):
+    """为内容哈希命名的构建产物加上长期缓存头。
+
+    Vite 产物文件名带内容哈希（``index-swFOtJQA.js``），内容变了文件名就变，
+    因此可以安全地长期缓存。缺少 ``Cache-Control`` 时浏览器每次导航都会回源校验，
+    在公网链路上会明显拖慢首屏。
+    """
+
+    def file_response(self, *args, **kwargs):  # noqa: ANN002, ANN003, ANN201
+        response = super().file_response(*args, **kwargs)
+        response.headers.setdefault(
+            "Cache-Control", "public, max-age=31536000, immutable"
+        )
+        return response
+
+
 def _mount_frontend(app: FastAPI) -> None:
     """挂载前端 build 产物并配置 SPA 回退。
 
@@ -174,7 +190,11 @@ def _mount_frontend(app: FastAPI) -> None:
     logger.info("前端静态资源前缀：%s（子路径：%s）", asset_prefix, base_prefix or "/")
 
     if assets_dir.exists():
-        app.mount(asset_prefix, StaticFiles(directory=assets_dir), name="assets")
+        app.mount(
+            asset_prefix,
+            _ImmutableStaticFiles(directory=assets_dir),
+            name="assets",
+        )
 
     # 前端 public 目录下的静态资源（同时注册根路径与子路径）
     for name in ("favicon.svg", "favicon.ico", "logo.svg", "robots.txt"):

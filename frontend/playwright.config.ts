@@ -12,12 +12,23 @@ const USE_BUNDLED = process.env.E2E_USE_BUNDLED_BROWSER === '1';
 
 const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:8000';
 
+/**
+ * 是否为远程目标（公网 HTTPS 入口）。
+ *
+ * 远程目标的每一次请求都要经过公网往返，而且每个用例都会新建商户账号，
+ * 触发 Argon2 哈希（CPU 密集）。本机默认的 15 秒动作超时在公网下会偶发超时，
+ * 表现为随机的登录/保存失败——服务端日志却是 0 错误、负载接近 0。
+ * 因此对远程目标放宽超时，同时保留重试，避免把网络抖动误报成产品缺陷。
+ */
+const IS_REMOTE = !/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|\/|$)/.test(BASE_URL);
+const SCALE = IS_REMOTE ? 2 : 1;
+
 export default defineConfig({
   testDir: './e2e',
-  timeout: 90_000,
-  expect: { timeout: 15_000 },
+  timeout: 90_000 * SCALE,
+  expect: { timeout: 15_000 * SCALE },
   fullyParallel: false,
-  retries: 0,
+  retries: IS_REMOTE ? 1 : 0,
   workers: 1,
   reporter: [['list']],
   use: {
@@ -26,8 +37,8 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     locale: 'zh-CN',
     timezoneId: 'Asia/Shanghai',
-    actionTimeout: 15_000,
-    navigationTimeout: 30_000,
+    actionTimeout: 15_000 * SCALE,
+    navigationTimeout: 30_000 * SCALE,
   },
   projects: [
     {
