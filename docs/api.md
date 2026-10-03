@@ -112,6 +112,49 @@
 `pending_inflows_at_limit` / `payment_gap_cents` / `buffer_gap_cents` / `points`（完整曲线）/
 `scenarios`（多情景）/ `engine_version`。
 
+### 状态口径（引擎 2.0.0）
+
+| 状态 | 含义 |
+| --- | --- |
+| `FEASIBLE` | 期初与未来所有时点都不低于留底 |
+| `PAYMENT_GAP` | 某时点余额为负 |
+| `BELOW_BUFFER` | 能付款，但某时点低于留底 |
+| `INPUT_INCOMPLETE` | 资料未确认，`max_withdrawable_cents` 为 `null` |
+
+旧的 `OK` 只作为**历史数据读取兼容值**：接口会把历史行归一为 `FEASIBLE`，
+并额外返回 `engine_version_current` 表示该结果是否由当前引擎产生。
+
+`max_withdrawable = max(0, min(所有时点余额) - 留底)`，其中时点集合**包含期初时点**。
+因此未来收入不能提前提用，收入后移与提高留底都不会提高上限。
+
+`pending_settlement_cents` 只统计 `event_type=settlement` 的计划中收入，
+与 `window_inflow_cents`（全部计划收入）是两个独立口径。
+
+## 资金增强
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/enhancements/overview` | 增强总览：baseline、结算延期压力、日常收付参考、留底建议、两个 revision、`basis_hash` |
+| POST | `/enhancements/reserve/confirm` | 确认采用建议留底（仅用户点击触发；依据变化返回 409） |
+| GET | `/history/daily` | 已确认完整的历史经营数据 |
+| POST | `/history/import/preview` | 历史数据导入预览（含完整性确认检查） |
+| POST | `/history/import/confirm` | 确认导入（未确认完整性时 422） |
+| GET | `/settlement-records` | 结算记录（预计 / 实际到账配对） |
+| POST | `/settlement-records/import/preview` | 结算记录导入预览 |
+| POST | `/settlement-records/import/confirm` | 确认导入 |
+
+权限：以上**只允许 merchant**。家庭成员与咨询人员一律 403；
+所有查询都以调用者自己的 `merchant_id` 为根。
+
+`/enhancements/overview` 中 `forecast_affects_withdrawable` 恒为 `false`：
+历史参考永远不会影响今天可提用金额。
+
+留底确认失败时：
+
+```json
+{ "code": "STALE_RESERVE_ADVICE", "message": "相关数据已经更新，请重新查看留底建议后再确认。", "details": {} }
+```
+
 ## 家庭协同
 
 | 方法 | 路径 | 说明 |
@@ -156,16 +199,19 @@
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/ai/status` | 智能服务状态（不返回密钥） |
-| POST | `/ai/extract-cash-event` | 智能录入：自然语言 → 结构化事项（**需用户确认后才写入**） |
+| GET | `/ai/status` | 智能服务状态：`enabled` / `configured` / `available` / `provider` / `text_model` / `vision_model`（**不含密钥**） |
+| POST | `/ai/extract-cash-event` | 文字智能录入：粘贴原文 → 结构化事项（**需用户确认后才写入**） |
+| POST | `/ai/extract-cash-event-from-image` | 截图智能录入：单张 PNG/JPEG/WEBP，最大 5MB（**需用户确认后才写入**） |
 | POST | `/ai/explain-analysis` | 帮我讲清楚：只接收结构化结论字段 |
 | POST | `/ai/draft-consultation` | 咨询描述整理：只使用白名单字段 |
 
 失败统一返回：
 
 ```json
-{ "code": "AI_UNAVAILABLE", "message": "智能服务暂时不可用，请手动完成当前操作", "details": {} }
+{ "code": "AI_UNAVAILABLE", "message": "智能服务暂时不可用，你仍可以手动完成当前操作", "details": {} }
 ```
+
+文本模型 `glm-4.5-air`，视觉模型 `glm-4.6v`。详见 `docs/glm-integration.md`。
 
 ## 系统管理
 
@@ -173,6 +219,13 @@
 | --- | --- | --- |
 | GET | `/admin/overview` | 账户 / 商户 / 事项 / 咨询 / 家庭 / 分析结果计数 |
 | GET | `/admin/users` | 用户列表（支持搜索与分页） |
+| POST | `/admin/users` | **创建账户**：咨询人员只能通过这里创建；管理员只能由管理员创建 |
 | POST | `/admin/users/{id}/status` | 启用 / 停用账户 |
 | GET | `/admin/runtime` | 运行状态（数据库可用性、体积、WAL、待重算数、近期异常） |
 | GET | `/admin/audit-logs` | 审计日志 |
+
+## 注册角色范围
+
+公开注册（`POST /auth/register`）**只允许** `merchant` 与 `family_member`。
+提交 `consultant` 或 `admin` 一律 422。咨询人员由管理员通过 `POST /admin/users`
+开通；管理员由已有管理员或 `scripts/provision_admin.py` 创建。

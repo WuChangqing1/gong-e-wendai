@@ -105,8 +105,8 @@ openssl rand -hex 32   # 生成 JWT_SECRET
 ```env
 APP_ENV=production
 APP_NAME=gong-e-wendai
-APP_HOST=0.0.0.0
-APP_PORT=18082
+APP_HOST=127.0.0.1
+APP_PORT=18089
 
 DATABASE_URL=sqlite:////home/ubuntu/apps/gong-e-wendai-data/app.db
 SQLITE_BUSY_TIMEOUT_MS=5000
@@ -115,7 +115,7 @@ JWT_SECRET=<openssl rand -hex 32 的输出>
 JWT_ALGORITHM=HS256
 JWT_ACCESS_EXPIRE_MINUTES=30
 JWT_REFRESH_EXPIRE_DAYS=14
-COOKIE_SECURE=false          # 启用 HTTPS 后改为 true
+COOKIE_SECURE=false          # 站内为 HTTPS 转发，按需改为 true
 
 CORS_ORIGINS=               # 同源部署，留空
 
@@ -124,33 +124,60 @@ MAX_UPLOAD_MB=5
 LOG_LEVEL=INFO
 LOG_DIR=/home/ubuntu/apps/gong-e-wendai-data/logs
 
-AI_ENABLED=false
-AI_API_KEY=
-AI_BASE_URL=
-AI_MODEL=
-AI_TIMEOUT_SECONDS=30
+# 智能服务（智谱 GLM）
+AI_ENABLED=true
+GLM=<智谱 API Key，通过 stdin 写入，绝不走命令行参数>
+GLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4/
+GLM_TEXT_MODEL=glm-4.5-air
+GLM_VISION_MODEL=glm-4.6v
+GLM_TIMEOUT_SECONDS=30
+GLM_VISION_TIMEOUT_SECONDS=45
 ```
 
 生产启动前应用会自检：`JWT_SECRET` 必须是至少 32 字符的随机值、`CORS_ORIGINS` 不允许 `*`，
 不满足时**拒绝启动**。
+
+### 5.1 安全写入 GLM 密钥
+
+密钥只允许通过 **stdin** 传输到服务器上的安全更新脚本，不得出现在 SSH 命令行参数、
+Git URL、shell 历史或临时脚本源码里：
+
+```bash
+# 本地（PowerShell）：把 Machine 作用域的 GLM 通过管道发送，不落盘、不打印
+[Environment]::GetEnvironmentVariable('GLM','Machine') |
+  ssh fengz "~/apps/gong-e-wendai/scripts/update_glm_env.sh"
+
+# 脚本只输出：GLM credential configured
+```
+
+检查时只能确认变量存在，**绝不** `cat` 整个 `.env.production`。
 
 ## 6. 数据库迁移
 
 ```bash
 cd ~/apps/gong-e-wendai/backend
 set -a; . ../.env.production; set +a
-../.venv/bin/alembic upgrade head
-../.venv/bin/alembic check
+../.venv/bin/python ../scripts/backup_db.py   # 先备份
+../.venv/bin/python -m alembic upgrade head
+../.venv/bin/python -m alembic check
 ```
+
+**顺序很重要**：必须先完成迁移再重启服务。引擎 2.0.0 引入了 5 张新表，
+旧代码不需要它们，但新代码启动后第一次写入事项就会访问 `merchant_analysis_states`。
 
 生产首次启动只运行迁移，**不会**生成任何账户或种子数据。
 
-管理员账户按需创建：
+管理员账户按需创建（密码随机生成、写入 `0600` 文件、不打印到终端）：
 
 ```bash
 cd ~/apps/gong-e-wendai/backend
-../.venv/bin/python ../scripts/create_admin.py --username admin --password 'YourPass123' --name 系统管理员
+../.venv/bin/python ../scripts/provision_admin.py --username xitongguanli --name 系统管理员
+# 输出：已创建独立管理员账户 xitongguanli
+#      凭据已写入 /home/ubuntu/admin-credentials.txt（权限 600），未打印到终端
 ```
+
+登录后立即修改密码，然后删除该凭据文件。**不要**给经营者账号附加 admin 角色：
+管理员必须是彼此独立的账户。
 
 ## 7. 一键部署
 
@@ -262,5 +289,23 @@ bash scripts/deploy.sh             # 自动：git pull → 依赖 → 构建 →
 | 页面 404 | `frontend/dist` 是否存在；重新执行 `npm run build` |
 | `/api/*` 返回 HTML | 不应发生；确认请求路径以 `/api/` 开头 |
 | 数据库锁定 | 确认只有 1 个 worker；检查 `SQLITE_BUSY_TIMEOUT_MS` |
-| 智能服务不可用 | 检查 `AI_ENABLED` / `AI_API_KEY` / `AI_BASE_URL` / `AI_MODEL`；不影响其他功能 |
+| 写入事项报「服务处理失败」且日志出现 `no such table: merchant_analysis_states` | 迁移未执行：`alembic upgrade head` 后重启服务 |
+| 智能服务不可用 | 检查 `AI_ENABLED` / `GLM` / `GLM_BASE_URL` / `GLM_TEXT_MODEL`；不影响其他功能 |
+| 截图识别不可用但文字可用 | 检查 `GLM_VISION_MODEL` 与账户是否开通视觉模型额度 |
+| 留底确认返回 409 | 期间数据已更新（revision 或 basis_hash 变化），重新查看建议后再确认 |
+| 「历史记录还不够」 | 历史完整日不足算法要求；核心功能照常可用，补录历史后自动出现参考 |
 | 端口被占用 | 不要 kill 陌生进程；报告占用情况并更换端口 |
+
+## 13. 端口与入口现状
+
+| 项目 | 值 |
+| --- | --- |
+| 对外入口 | `https://ccqspace.site/wendai/`（复用现有站点证书） |
+| Nginx 监听 | `0.0.0.0:18088`，`/wendai/` 反向代理 |
+| 应用监听 | `127.0.0.1:18089` |
+| 服务单元 | systemd user service `gong-e-wendai` |
+
+> 原始规格要求 TCP 18082，但该端口已被既有项目占用（烟厂制丝线物流智能监控平台）。
+> 按「不得破坏既有项目」的约束，本项目改用 18088（Nginx）→ 18089（应用），
+> 既有 18082 / 18085 / `/home/` 服务未受影响。详见
+> `docs/https-subpath-deployment.md`。
