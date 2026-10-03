@@ -16,6 +16,14 @@ import {
   Tag,
   Typography,
 } from 'antd';
+import {
+  BulbOutlined,
+  SafetyCertificateOutlined,
+  ShopOutlined,
+  TeamOutlined,
+  UserOutlined,
+} from '@ant-design/icons';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { authApi, meApi, merchantApi } from '@/api/auth';
@@ -24,6 +32,12 @@ import { householdApi } from '@/api/household';
 import { errorMessage } from '@/api/client';
 import { queryKeys, queryClient } from '@/api/queryClient';
 import { DescriptionGrid, InlineNote, PageHeader, SectionCard, StatusTag } from '@/components/ui';
+import {
+  MobileSettingsDetail,
+  MobileSettingsMenu,
+  type SettingsSection,
+} from '@/features/settings/MobileSettingsMenu';
+import { useIsMobile } from '@/hooks/useResponsive';
 import { useAuthStore, useUiStore } from '@/store';
 import { formatCny } from '@/utils/money';
 import { formatDateTime } from '@/utils/datetime';
@@ -41,6 +55,9 @@ export default function SettingsPage() {
   const toggleSidebar = useUiStore((state) => state.toggleSidebar);
   const collapsed = useUiStore((state) => state.sidebarCollapsed);
   const [snapshotForm] = Form.useForm<{ opening_balance: number; buffer: number }>();
+  const isMobile = useIsMobile();
+  /** 手机端当前打开的设置分组；null 表示停留在设置列表。 */
+  const [mobileSection, setMobileSection] = useState<string | null>(null);
 
   const isMerchant = Boolean(user?.roles.includes('merchant'));
 
@@ -519,19 +536,65 @@ export default function SettingsPage() {
     </SectionCard>
   );
 
+  const settingsSections: SettingsSection[] = [
+    {
+      key: 'personal',
+      label: '个人资料',
+      description: '称呼、手机号、邮箱与账户信息',
+      icon: <UserOutlined />,
+      content: personalTab,
+    },
+    {
+      key: 'merchant',
+      label: '经营资料',
+      description: '经营名称、类型、收款账户与经营留底',
+      icon: <ShopOutlined />,
+      content: merchantTab,
+    },
+    {
+      key: 'household',
+      label: '家庭设置',
+      description: '家庭协同、邀请码与成员管理',
+      icon: <TeamOutlined />,
+      content: householdTab,
+    },
+    {
+      key: 'security',
+      label: '安全设置',
+      description: '修改密码、登录凭证与有效会话',
+      icon: <SafetyCertificateOutlined />,
+      content: securityTab,
+    },
+    {
+      key: 'ai',
+      label: '智能服务状态',
+      description: '文字与截图识别是否可用、密钥位置',
+      icon: <BulbOutlined />,
+      content: aiTab,
+    },
+  ];
+
+  const activeSection = settingsSections.find((item) => item.key === mobileSection) ?? null;
+
   return (
     <div className="gew-stack">
       <PageHeader title="我的" subtitle="个人资料、经营资料、留底设置、家庭设置与安全设置" />
 
-      <Tabs
-        items={[
-          { key: 'personal', label: '个人资料', children: personalTab },
-          { key: 'merchant', label: '经营资料', children: merchantTab },
-          { key: 'household', label: '家庭设置', children: householdTab },
-          { key: 'security', label: '安全设置', children: securityTab },
-          { key: 'ai', label: '智能服务', children: aiTab },
-        ]}
-      />
+      {isMobile ? (
+        activeSection ? (
+          <MobileSettingsDetail section={activeSection} onBack={() => setMobileSection(null)} />
+        ) : (
+          <MobileSettingsMenu sections={settingsSections} onOpen={setMobileSection} />
+        )
+      ) : (
+        <Tabs
+          items={settingsSections.map((item) => ({
+            key: item.key,
+            label: item.label,
+            children: item.content,
+          }))}
+        />
+      )}
     </div>
   );
 }

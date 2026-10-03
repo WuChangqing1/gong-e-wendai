@@ -879,6 +879,84 @@ a:hover {
   }
 }
 
+/* ---------------- 手机端「我的」设置列表 ---------------- */
+.gew-settings-menu {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.gew-settings-menu .ant-list-item {
+  padding: 14px var(--space-4);
+  min-height: 60px;
+  cursor: pointer;
+}
+
+.gew-settings-menu .ant-list-item:not(:last-child) {
+  border-bottom: 1px solid var(--divider);
+}
+
+.gew-settings-menu__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--surface-sunken);
+  color: var(--brand-red);
+  font-size: 17px;
+}
+
+.gew-settings-menu .ant-list-item-meta-title {
+  margin-bottom: 2px !important;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.gew-settings-menu .ant-list-item-meta-description {
+  font-size: 12px;
+}
+
+.gew-settings-detail__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: calc(-1 * var(--space-3));
+}
+
+.gew-settings-detail__title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* ---------------- 手机端筛选抽屉 ---------------- */
+.gew-filter-sheet .ant-drawer-body {
+  padding: var(--space-4);
+}
+
+.gew-filter-sheet__group {
+  margin-bottom: var(--space-4);
+}
+
+.gew-filter-sheet__label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.gew-filter-sheet__actions {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.gew-filter-sheet__actions .ant-btn {
+  flex: 1 1 0;
+  min-height: 44px;
+}
+
 /* ---------------- 手机端咨询卡片列表 ---------------- */
 .gew-consult-cards {
   list-style: none;

@@ -7,6 +7,7 @@ import {
   App as AntdApp,
   Button,
   DatePicker,
+  Drawer,
   Empty,
   Input,
   Pagination,
@@ -91,6 +92,115 @@ export default function EventsPage() {
     (state ? 1 : 0) +
     (eventType ? 1 : 0) +
     (range ? 1 : 0);
+
+  const resetFilters = () => {
+    setSearch('');
+    setDirection(undefined);
+    setState(undefined);
+    setEventType(undefined);
+    setRange(null);
+    setPage(1);
+  };
+
+  /**
+   * 筛选控件。桌面端平铺、手机端放进底部抽屉 —— 用的是同一份节点，
+   * 避免两套实现随时间漂移出不一致的选项。
+   */
+  const filterControls = (layout: 'inline' | 'sheet') => {
+    const width = (desktop: number) => (layout === 'sheet' ? '100%' : desktop);
+    const select = (
+      <Select
+        allowClear
+        placeholder="收支方向"
+        style={{ width: width(130) }}
+        value={direction}
+        onChange={(value) => {
+          setDirection(value);
+          setPage(1);
+        }}
+        options={[
+          { value: 'inflow', label: '收入' },
+          { value: 'outflow', label: '支出' },
+        ]}
+      />
+    );
+    const stateSelect = (
+      <Select
+        allowClear
+        placeholder="状态"
+        style={{ width: width(150) }}
+        value={state}
+        onChange={(value) => {
+          setState(value);
+          setPage(1);
+        }}
+        options={[
+          { value: 'scheduled', label: '计划中' },
+          { value: 'included_in_opening', label: '已计入期初' },
+          { value: 'cancelled', label: '已取消' },
+        ]}
+      />
+    );
+    const typeSelect = (
+      <Select
+        allowClear
+        placeholder="事项类型"
+        style={{ width: width(150) }}
+        value={eventType}
+        onChange={(value) => {
+          setEventType(value);
+          setPage(1);
+        }}
+        options={Object.entries(EVENT_TYPE_LABELS).map(([value, label]) => ({ value, label }))}
+      />
+    );
+    const dateRange = (
+      <DatePicker.RangePicker
+        showTime={{ format: 'HH:mm' }}
+        style={{ width: layout === 'sheet' ? '100%' : undefined }}
+        onChange={(values) => {
+          if (values && values[0] && values[1]) {
+            setRange([values[0].toISOString(), values[1].toISOString()]);
+          } else {
+            setRange(null);
+          }
+          setPage(1);
+        }}
+      />
+    );
+
+    if (layout === 'sheet') {
+      return (
+        <>
+          <div className="gew-filter-sheet__group">
+            <span className="gew-filter-sheet__label">预计时间区间</span>
+            {dateRange}
+          </div>
+          <div className="gew-filter-sheet__group">
+            <span className="gew-filter-sheet__label">收支方向</span>
+            {select}
+          </div>
+          <div className="gew-filter-sheet__group">
+            <span className="gew-filter-sheet__label">状态</span>
+            {stateSelect}
+          </div>
+          <div className="gew-filter-sheet__group">
+            <span className="gew-filter-sheet__label">事项类型</span>
+            {typeSelect}
+          </div>
+        </>
+      );
+    }
+
+    return (
+      <>
+        {select}
+        {stateSelect}
+        {typeSelect}
+        {dateRange}
+      </>
+    );
+  };
 
   const params: CashEventQuery = useMemo(
     () => ({
@@ -340,96 +450,63 @@ export default function EventsPage() {
           </Tooltip>
         }
       >
-        <Space wrap style={{ marginBottom: isMobile && !filtersOpen ? 12 : 16 }}>
+        <Space wrap style={{ marginBottom: 16 }}>
           {isMobile ? (
-            <Button
-              icon={<FilterOutlined />}
-              onClick={() => setFiltersOpen((value) => !value)}
-              aria-expanded={filtersOpen}
-              type={activeFilterCount > 0 ? 'primary' : 'default'}
-              ghost={activeFilterCount > 0}
-            >
-              筛选{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
-            </Button>
-          ) : null}
-          {!isMobile || filtersOpen ? (
             <>
               <Input.Search
                 allowClear
                 placeholder="搜索事项名称、编号、备注"
-                style={{ width: isMobile ? '100%' : 240 }}
+                style={{ width: 'calc(100% - 96px)' }}
                 onSearch={(value) => {
                   setSearch(value);
                   setPage(1);
                 }}
               />
-              <Select
-                allowClear
-                placeholder="收支方向"
-                style={{ width: isMobile ? 100 : 130 }}
-                value={direction}
-                onChange={(value) => {
-                  setDirection(value);
-                  setPage(1);
-                }}
-                options={[
-                  { value: 'inflow', label: '收入' },
-                  { value: 'outflow', label: '支出' },
-                ]}
-              />
-              <Select
-                allowClear
-                placeholder="状态"
-                style={{ width: isMobile ? 100 : 150 }}
-                value={state}
-                onChange={(value) => {
-                  setState(value);
-                  setPage(1);
-                }}
-                options={[
-                  { value: 'scheduled', label: '计划中' },
-                  { value: 'included_in_opening', label: '已计入期初' },
-                  { value: 'cancelled', label: '已取消' },
-                ]}
-              />
-              <Select
-                allowClear
-                placeholder="事项类型"
-                style={{ width: isMobile ? 110 : 150 }}
-                value={eventType}
-                onChange={(value) => {
-                  setEventType(value);
-                  setPage(1);
-                }}
-                options={Object.entries(EVENT_TYPE_LABELS).map(([value, label]) => ({ value, label }))}
-              />
-              <DatePicker.RangePicker
-                showTime={{ format: 'HH:mm' }}
-                style={{ width: isMobile ? '100%' : undefined }}
-                onChange={(values) => {
-                  if (values && values[0] && values[1]) {
-                    setRange([values[0].toISOString(), values[1].toISOString()]);
-                  } else {
-                    setRange(null);
-                  }
-                  setPage(1);
-                }}
-              />
+              {/* 手机端不把 4 个下拉塞成一行：筛选收进底部抽屉，按钮上显示生效条件数。 */}
               <Button
-                onClick={() => {
-                  setSearch('');
-                  setDirection(undefined);
-                  setState(undefined);
-                  setEventType(undefined);
-                  setRange(null);
-                  setPage(1);
-                }}
+                icon={<FilterOutlined />}
+                onClick={() => setFiltersOpen(true)}
+                type={activeFilterCount > 0 ? 'primary' : 'default'}
+                ghost={activeFilterCount > 0}
               >
-                重置
+                筛选{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
               </Button>
             </>
-          ) : null}
+          ) : (
+            <>
+              <Input.Search
+                allowClear
+                placeholder="搜索事项名称、编号、备注"
+                style={{ width: 240 }}
+                onSearch={(value) => {
+                  setSearch(value);
+                  setPage(1);
+                }}
+              />
+              {filterControls('inline')}
+              <Button onClick={resetFilters}>重置</Button>
+            </>
+          )}
         </Space>
+
+        <Drawer
+          title="筛选收付款事项"
+          placement="bottom"
+          height="auto"
+          open={isMobile && filtersOpen}
+          onClose={() => setFiltersOpen(false)}
+          className="gew-filter-sheet"
+          footer={
+            <div className="gew-filter-sheet__actions">
+              <Button onClick={resetFilters}>重置</Button>
+              <Button type="primary" onClick={() => setFiltersOpen(false)}>
+                确认
+              </Button>
+            </div>
+          }
+        >
+          {filterControls('sheet')}
+        </Drawer>
 
         <ResponsiveDataView
           mobileCards={
