@@ -45,6 +45,31 @@
 | `scenario_event_overrides` | 情景对事项的假设覆盖 | `scenario_id` + `cash_event_id` 唯一，`scheduled_at_override`、`amount_cents_override`、`direction_override`、`state_override` |
 | `analysis_results` | 分析结果（可追溯） | `status`、`max_withdrawable_cents`、`opening_balance_cents`、`buffer_cents`、`snapshot_at`、`window_end_at`、`limiting_*`、`payment_gap_cents`、`buffer_gap_cents`、`payload`（完整曲线）、`events_version_hash`、`is_stale`、`stale_reason`、`engine_version` |
 
+### 资金增强（引擎 2.0.0 新增）
+
+| 表 | 说明 | 关键字段 |
+| --- | --- | --- |
+| `merchant_analysis_states` | 每个商户的分析状态版本 | `merchant_id`（主键）、`ledger_revision`、`history_revision` |
+| `daily_cash_history` | 已确认完整的自然日 | `day`（`YYYY-MM-DD`，北京时间）、`complete`、`inflow_cents`、`outflow_cents`、`source_refs`、`import_batch_id`、`completeness_confirmed` |
+| `settlement_records` | 结算到账配对 | `external_key`、`channel`、`scheduled_at`、`actual_at`、`known_at`、`status`（`open` / `completed` / `cancelled`）、`source_ref` |
+| `enhancement_runs` | 一次增强计算的留档 | `ledger_revision`、`history_revision`、`basis_hash`、`parameters_json`、`result_json`、`is_stale`、`stale_reason` |
+| `reserve_advice_confirmations` | 留底建议确认记录 | `previous_reserve_cents`、`suggested_reserve_cents`、`confirmed_reserve_cents`、`basis_hash`、两个 revision、`basis_json`、`confirmed_by`、`confirmed_at` |
+
+唯一约束：
+
+* `daily_cash_history`：`(merchant_id, day)` 唯一
+* `settlement_records`：`(merchant_id, external_key)` 唯一
+
+**缺失日期约定**：`daily_cash_history` 只保存已确认完整的自然日。
+没有记录的日期**不代表金额为 0**，而是「不清楚」。只有 `completeness_confirmed`
+为真（商户在导入时明确确认该日期范围数据完整）之后，缺失交易的完整日期才允许
+聚合为 0。
+
+**版本与失效**：任何正式 `CashEvent` 的金额 / 日期 / 状态 / 方向变化会让
+`ledger_revision` + 1；任何历史数据或结算记录变化会让 `history_revision` + 1。
+任一版本或 `basis_hash` 变化都会让既有 `EnhancementRun` 标为 `stale`，
+留底确认会返回 409 `STALE_RESERVE_ADVICE`。
+
 ### 家庭协同
 
 | 表 | 说明 | 关键字段 |
@@ -102,8 +127,28 @@ python -m alembic revision --autogenerate -m "描述"
 
 * 初始迁移 `0053fb3fa9b7_initial_schema.py`（20 张表）
 * `0ee06e0f0f90_add_import_batches.py`（导入批次表）
+* `6e784eb94252_add_enhancement_history_and_settlement_.py`（增强 v2：5 张新表 +
+  回填每个商户的分析状态行 + 把 2.0.0 之前的分析结果标为 `is_stale`）
 * `alembic check` 必须无差异
 * 生产首次启动只运行迁移，**不生成任何种子数据**
+
+### 升级到引擎 2.0.0 的迁移行为
+
+```bash
+# 迁移前必须备份
+python scripts/backup_db.py
+python -m alembic upgrade head
+```
+
+该迁移**只做增量新增**，不删除、不重建任何既有表与数据：
+
+1. 新增 5 张表
+2. 为每个已有商户回填一行 `merchant_analysis_states`（两个 revision 从 1 开始）
+3. 把旧引擎版本产生的 `analysis_results` 标记为 `is_stale`，`stale_reason`
+   写明「计算引擎已升级到 2.0.0：期初余额已纳入提用上限约束，请重新计算」
+
+旧结果全部保留，只是不再作为当前决策依据。旧用户、旧 `CashEvent`、旧家庭卡、
+旧咨询记录均不受影响。
 
 ## 备份
 

@@ -16,7 +16,13 @@ from app.core.security import (
     token_fingerprint,
     verify_password,
 )
-from app.models.user import ROLE_MERCHANT, User
+from app.models.user import (
+    ROLE_ADMIN,
+    ROLE_CONSULTANT,
+    ROLE_FAMILY_MEMBER,
+    ROLE_MERCHANT,
+    User,
+)
 from app.repositories.user_repo import AuditRepository, RefreshSessionRepository, UserRepository
 from app.schemas.user import LoginRequest, RegisterRequest, UserMe, UserPublic
 from app.services.merchant_service import MerchantService
@@ -30,6 +36,9 @@ ACTION_LOGOUT = "auth.logout"
 ACTION_REGISTER = "auth.register"
 ACTION_REFRESH = "auth.refresh"
 ACTION_PASSWORD_CHANGED = "auth.password_changed"
+
+#: 允许自助注册的角色。咨询人员与管理员都只能由管理员或安全脚本创建。
+SELF_REGISTER_ROLES = (ROLE_MERCHANT, ROLE_FAMILY_MEMBER)
 
 
 class AuthService:
@@ -56,8 +65,17 @@ class AuthService:
             )
 
         roles = list(payload.roles)
-        if "admin" in roles and not settings.allow_admin_registration:
+        # 公开注册只允许经营主体与家庭成员。
+        # 咨询人员必须由管理员创建或授予；管理员只能由已有管理员或安全脚本创建。
+        if ROLE_ADMIN in roles and not settings.allow_admin_registration:
             raise Forbidden("管理员账户不能自助注册")
+        forbidden = [role for role in roles if role not in SELF_REGISTER_ROLES]
+        if forbidden:
+            raise Forbidden(
+                "该角色不能自助注册，请联系管理员开通",
+                code="ROLE_NOT_SELF_REGISTERABLE",
+                details={"roles": forbidden, "allowed": list(SELF_REGISTER_ROLES)},
+            )
 
         user = self.users.create(
             username=payload.username,

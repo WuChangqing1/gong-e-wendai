@@ -61,7 +61,7 @@ test.describe('图表化分析', () => {
     await expect(page.getByText('结算款').first()).toBeVisible();
 
     await page.locator('.ant-segmented-item').filter({ hasText: '支出结构' }).click();
-    await expect(page.getByText('供应商付款').first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText('进货款').first()).toBeVisible({ timeout: 15_000 });
   });
 
   test('说明文字收进可展开区域', async ({ page, request }) => {

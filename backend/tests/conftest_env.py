@@ -23,11 +23,21 @@ os.environ["JWT_ACCESS_EXPIRE_MINUTES"] = "30"
 os.environ["JWT_REFRESH_EXPIRE_DAYS"] = "14"
 os.environ["COOKIE_SECURE"] = "false"
 os.environ["CORS_ORIGINS"] = ""
+os.environ["LOG_LEVEL"] = "WARNING"
+
+# ---------------------------------------------------------------------------
+# 智能服务：测试环境必须与开发者的真实凭据完全隔离
+#
+# 本机可能配置了真实 GLM 环境变量。如果不显式清空，测试会：
+#   1. 读到真实密钥，让「未配置」相关的断言随机失败
+#   2. 在个别用例中真的向智谱发起请求
+# 因此这里强制关闭并删除所有密钥变量，测试只使用注入的测试替身。
+# ---------------------------------------------------------------------------
 os.environ["AI_ENABLED"] = "false"
-os.environ["AI_API_KEY"] = ""
+for _name in ("GLM", "GLM_API_KEY", "AI_API_KEY", "AI_BASE_URL", "AI_MODEL"):
+    os.environ.pop(_name, None)
 os.environ["AI_BASE_URL"] = ""
 os.environ["AI_MODEL"] = ""
-os.environ["LOG_LEVEL"] = "WARNING"
 
 TEST_ROOT = _TEST_ROOT
 TEST_DB_PATH = _TEST_DB

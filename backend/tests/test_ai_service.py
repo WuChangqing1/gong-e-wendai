@@ -19,7 +19,7 @@ from app.core.errors import AIServiceError
 from app.services.ai_service import (
     AIService,
     ExtractedEvent,
-    OpenAICompatibleClient,
+    GLMOpenAICompatibleClient,
     _amount_appears_in_text,
     _find_unknown_amounts,
     _load_json_object,
@@ -35,8 +35,17 @@ class FakeClient:
         self.calls: list[dict] = []
         self._capture = capture
 
-    def complete(self, *, system: str, user: str) -> str:
-        self.calls.append({"system": system, "user": user})
+    def complete(
+        self,
+        *,
+        system: str,
+        user: str,
+        temperature: float = 0.1,
+        image: object | None = None,
+    ) -> str:
+        self.calls.append(
+            {"system": system, "user": user, "temperature": temperature, "image": image}
+        )
         if isinstance(self.response, Exception):
             raise self.response
         return self.response
@@ -96,7 +105,7 @@ class TestExtractCashEvent:
 
     def test_timeout_maps_to_unavailable(self, monkeypatch):
         """真实客户端把 httpx 超时转换为统一的 AIServiceError。"""
-        client = OpenAICompatibleClient(
+        client = GLMOpenAICompatibleClient(
             base_url="https://api.example.com/v1",
             api_key="sk-x",
             model="m",
@@ -116,7 +125,7 @@ class TestExtractCashEvent:
             service.extract_cash_event("结算款 100 元")
 
     def test_http_500_maps_to_unavailable(self, monkeypatch):
-        client = OpenAICompatibleClient(
+        client = GLMOpenAICompatibleClient(
             base_url="https://api.example.com/v1",
             api_key="sk-x",
             model="m",
@@ -135,7 +144,7 @@ class TestExtractCashEvent:
             client.complete(system="s", user="u")
 
     def test_malformed_payload_maps_to_unavailable(self, monkeypatch):
-        client = OpenAICompatibleClient(
+        client = GLMOpenAICompatibleClient(
             base_url="https://api.example.com/v1",
             api_key="sk-x",
             model="m",
@@ -160,20 +169,20 @@ class TestExtractCashEvent:
         )
         assert response.status_code == 503
         assert response.json()["code"] == "AI_UNAVAILABLE"
-        assert response.json()["message"] == "智能服务暂时不可用，请手动完成当前操作"
+        assert response.json()["message"] == "智能服务暂时不可用，你仍可以手动完成当前操作"
 
         explain = merchant_client.post(
             "/api/v1/ai/explain-analysis", json={"max_withdrawable_cents": 120000}
         )
         assert explain.status_code == 503
-        assert explain.json()["message"] == "智能服务暂时不可用，请手动完成当前操作"
+        assert explain.json()["message"] == "智能服务暂时不可用，你仍可以手动完成当前操作"
 
         draft = merchant_client.post(
             "/api/v1/ai/draft-consultation",
             json={"question_type": "other", "question": "测试", "fields": {}},
         )
         assert draft.status_code == 503
-        assert draft.json()["message"] == "智能服务暂时不可用，请手动完成当前操作"
+        assert draft.json()["message"] == "智能服务暂时不可用，你仍可以手动完成当前操作"
 
     def test_unknown_amount_is_filtered(self):
         """AI 返回的金额在原文中找不到 -> 视为猜测并清空。"""
@@ -388,9 +397,9 @@ class TestHelpers:
             ExtractedEvent.model_validate({"amount_cents": 100, "direction": "收入"})
 
 
-class TestOpenAICompatibleClient:
+class TestGLMOpenAICompatibleClient:
     def test_endpoint_normalisation(self):
-        client = OpenAICompatibleClient(
+        client = GLMOpenAICompatibleClient(
             base_url="https://api.example.com/v1",
             api_key="sk-x",
             model="m",
@@ -398,7 +407,7 @@ class TestOpenAICompatibleClient:
         )
         assert client.endpoint == "https://api.example.com/v1/chat/completions"
 
-        client2 = OpenAICompatibleClient(
+        client2 = GLMOpenAICompatibleClient(
             base_url="https://api.example.com/v1/chat/completions",
             api_key="sk-x",
             model="m",
@@ -407,7 +416,7 @@ class TestOpenAICompatibleClient:
         assert client2.endpoint == "https://api.example.com/v1/chat/completions"
 
     def test_network_error_maps_to_unavailable(self, monkeypatch):
-        client = OpenAICompatibleClient(
+        client = GLMOpenAICompatibleClient(
             base_url="https://example.invalid/v1",
             api_key="sk-x",
             model="m",
@@ -448,7 +457,7 @@ class TestAiFailureDoesNotAffectCore:
         assert merchant_client.get("/api/v1/cash-events").status_code == 200
         analysis = merchant_client.get("/api/v1/analysis/today").json()
         assert analysis["max_withdrawable_cents"] == 1200_00
-        assert analysis["status"] == "OK"
+        assert analysis["status"] == "FEASIBLE"
 
     def test_ai_status_endpoint(self, merchant_client):
         body = merchant_client.get("/api/v1/ai/status").json()

@@ -268,8 +268,13 @@ class CashEventService:
         )
 
         from app.services.analysis_service import AnalysisService
+        from app.services.enhancement_service import EnhancementService
 
         AnalysisService(self.db).mark_stale(profile.id, reason="新增收付款事项")
+        # 账本口径变化：增强结果的 ledger_revision 必须前进
+        enhancement = EnhancementService(self.db)
+        enhancement.bump_ledger_revision(profile.id, commit=False)
+        enhancement.mark_runs_stale(profile.id, "收付款事项已变化")
 
         if commit:
             self.db.commit()
@@ -321,10 +326,14 @@ class CashEventService:
 
         if material:
             from app.services.analysis_service import AnalysisService
+            from app.services.enhancement_service import EnhancementService
 
             AnalysisService(self.db).mark_stale(
                 event.merchant_id, reason="收付款事项发生变更"
             )
+            enhancement = EnhancementService(self.db)
+            enhancement.bump_ledger_revision(event.merchant_id, commit=False)
+            enhancement.mark_runs_stale(event.merchant_id, "收付款事项已变化")
 
         if commit:
             self.db.commit()
@@ -358,8 +367,12 @@ class CashEventService:
         )
 
         from app.services.analysis_service import AnalysisService
+        from app.services.enhancement_service import EnhancementService
 
         AnalysisService(self.db).mark_stale(event.merchant_id, reason="收付款事项被取消")
+        enhancement = EnhancementService(self.db)
+        enhancement.bump_ledger_revision(event.merchant_id, commit=False)
+        enhancement.mark_runs_stale(event.merchant_id, "收付款事项已变化")
 
         if commit:
             self.db.commit()

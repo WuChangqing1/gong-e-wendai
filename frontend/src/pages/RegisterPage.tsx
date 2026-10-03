@@ -27,7 +27,7 @@ interface RegisterForm {
   username: string;
   password: string;
   confirm_password: string;
-  role: 'merchant' | 'family_member' | 'consultant';
+  role: 'merchant' | 'family_member';
   business_name?: string;
   business_type?: string;
   phone?: string;
@@ -121,9 +121,11 @@ export default function RegisterPage() {
               >
                 <Radio.Button value="merchant">我是经营者</Radio.Button>
                 <Radio.Button value="family_member">我是家庭成员</Radio.Button>
-                <Radio.Button value="consultant">我是咨询人员</Radio.Button>
               </Radio.Group>
             </Form.Item>
+            <p style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: -8, marginBottom: 16 }}>
+              咨询人员账户由管理员开通，不在公开注册范围内。
+            </p>
 
             <Form.Item
               name="display_name"

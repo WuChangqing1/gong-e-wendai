@@ -65,7 +65,7 @@ test.describe('今日决策', () => {
     await loginViaUi(page, fixture.user.username);
     await gotoAuthed(page, '/today');
 
-    await expect(page.locator('.gew-hero__label')).toContainText('今日可提用');
+    await expect(page.locator('.gew-hero__label')).toContainText('今日最多可提用');
     const hero = page.locator('.gew-hero__amount');
     await expect(hero).toContainText('1,200');
     await expect(hero).toContainText('00');
@@ -80,7 +80,7 @@ test.describe('今日决策', () => {
     await expect(page.getByText('当前不可作为可用经营资金')).toBeVisible();
 
     await expect(page.getByText('最紧张资金时点')).toBeVisible();
-    await expect(page.getByText('供应商货款').first()).toBeVisible();
+    await expect(page.getByText('已确认退款').first()).toBeVisible();
 
     await expect(page.getByText('缺口情况')).toBeVisible();
     await expect(page.getByText('付款缺口').first()).toBeVisible();
@@ -99,7 +99,7 @@ test.describe('今日决策', () => {
     await expect(page.getByText('余额推演')).toBeVisible();
     await expect(page.getByText('结论', { exact: true })).toBeVisible();
     await expect(page.getByText('计算引擎版本')).toBeVisible();
-    await expect(page.getByText('最紧时点尚未到账的收入')).toBeVisible();
+    await expect(page.getByText('2.0.0')).toBeVisible();
   });
 
   test('未来趋势图渲染且图例用文字表达风险', async ({ page, request }) => {
@@ -116,26 +116,43 @@ test.describe('今日决策', () => {
     );
     await expect(page.getByText('0 元线（付款缺口）')).toBeVisible();
     await expect(page.getByText(/经营留底 ¥600\.00/)).toBeVisible();
-    await expect(page.getByText(/可提用 ¥1,200\.00/)).toBeVisible();
+    // 「可提用 ¥1,200.00」同时出现在图例与资金安排参考里，限定到趋势图卡片内
+    await expect(
+      page
+        .locator('.gew-card')
+        .filter({ hasText: '未来 7 天资金趋势' })
+        .getByText(/可提用 ¥1,200\.00/),
+    ).toBeVisible();
   });
 
-  test('到账延迟情景可提用归零', async ({ page, request }) => {
+  test('到账延迟情景不能提用，且不得描述为资金安排可行', async ({ page, request }) => {
     const fixture = await createMerchantFixture(request, 'delayed');
     await loginViaUi(page, fixture.user.username);
     await gotoAuthed(page, '/today');
 
     await page.locator('.ant-segmented-item').filter({ hasText: '到账延迟' }).click();
-    await expect(page.locator('.gew-hero__amount')).toContainText('0', { timeout: 25_000 });
-    await expect(page.getByText('当前不建议从经营资金中提用家庭资金')).toBeVisible();
+    // 首屏改为展示缺口金额，而不是把 0 当成最醒目的唯一信息
+    await expect(page.locator('.gew-hero__label')).toContainText('当前存在付款缺口', {
+      timeout: 25_000,
+    });
+    await expect(page.locator('.gew-hero__amount')).toContainText('200');
+    await expect(page.getByText('暂不建议提用家庭资金')).toBeVisible();
+    // 首屏结论区不得出现「资金安排可行」这类结论标签
+    await expect(page.locator('.gew-hero__label')).not.toContainText('资金安排可行');
   });
 
-  test('共同约束取最保守上限并标注来源情景', async ({ page, request }) => {
+  test('共同约束取最保守上限并说明 0 不代表可行', async ({ page, request }) => {
     const fixture = await createMerchantFixture(request, 'joint');
     await loginViaUi(page, fixture.user.username);
     await gotoAuthed(page, '/today');
 
     await page.locator('.ant-segmented-item').filter({ hasText: '共同约束' }).click();
-    await expect(page.locator('.gew-hero__amount')).toContainText('0', { timeout: 25_000 });
+    await expect(page.locator('.gew-hero__label')).toContainText('当前存在付款缺口', {
+      timeout: 25_000,
+    });
     await expect(page.getByText(/最保守的结果来自「到账延迟」情景/)).toBeVisible();
+    await expect(page.locator('.gew-hero__label')).not.toContainText('资金安排可行');
+    // 首屏必须明确说明「即使不提用也仍存在缺口」
+    await expect(page.locator('.gew-hero')).toContainText('即使不提用');
   });
 });

@@ -11,6 +11,7 @@ from app.api.v1 import (
     auth,
     cash_events,
     consultations,
+    enhancements,
     health,
     households,
     imports,
@@ -25,6 +26,7 @@ api_router.include_router(me.router)
 api_router.include_router(merchant.router)
 api_router.include_router(cash_events.router)
 api_router.include_router(analysis.router)
+api_router.include_router(enhancements.router)
 api_router.include_router(imports.router)
 api_router.include_router(households.router)
 api_router.include_router(consultations.router)

@@ -364,6 +364,14 @@ a:hover {
   max-width: 720px;
 }
 
+/* 「暂不建议提用家庭资金」：负面结论必须比普通说明更醒目 */
+.gew-hero__hint--strong {
+  margin-top: var(--space-4);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--danger);
+}
+
 .gew-hero__actions {
   margin-top: var(--space-5);
   display: flex;

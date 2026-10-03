@@ -10,7 +10,7 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # ---------------------------------------------------------------------------
@@ -53,6 +53,8 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
+        # 允许用字段名（GLM_API_KEY）或别名（GLM）配置密钥
+        populate_by_name=True,
     )
 
     # ---------------- app ----------------
@@ -87,11 +89,47 @@ class Settings(BaseSettings):
     log_dir: str = Field(default="./logs")
 
     # ---------------- ai provider ----------------
+    #
+    # 正式接入智谱 GLM。密钥一律用 SecretStr 保存：
+    # 它不会出现在 repr、日志、Traceback 或 API 响应里。
+    # 兼容旧的 AI_* 变量，但 GLM_* 优先。
     ai_enabled: bool = Field(default=False)
-    ai_api_key: str = Field(default="")
+
+    #: 智谱 API Key（最高敏感信息）。禁止打印、禁止写日志、禁止进 Git。
+    glm_api_key: SecretStr | None = Field(default=None, alias="GLM")
+    glm_base_url: str = Field(default="https://open.bigmodel.cn/api/paas/v4/")
+    glm_text_model: str = Field(default="glm-4.5-air")
+    glm_vision_model: str = Field(default="glm-4.6v")
+    glm_timeout_seconds: float = Field(default=30.0)
+    glm_vision_timeout_seconds: float = Field(default=45.0)
+    #: 单次请求最多消耗的 token，避免误用大额度
+    glm_max_tokens: int = Field(default=1024)
+    #: 失败重试次数（只对 429/5xx 生效，指数退避）
+    glm_max_retries: int = Field(default=2)
+
+    #: 兼容旧配置（GLM_* 优先）
+    ai_api_key: SecretStr | None = Field(default=None)
     ai_base_url: str = Field(default="")
     ai_model: str = Field(default="")
     ai_timeout_seconds: float = Field(default=30.0)
+
+    #: 图片上传限制：只允许单张，最大 5MB
+    ai_vision_max_bytes: int = Field(default=5 * 1024 * 1024)
+    ai_vision_max_images: int = Field(default=1)
+    #: 文本提取的输入长度上限
+    ai_text_max_chars: int = Field(default=4000)
+
+    model_config = SettingsConfigDict(
+        # 生产环境忽略 .env 文件，只使用真实环境变量
+        env_file=None if os.environ.get("APP_ENV", "").lower() in {"production", "prod"} else (
+            PROJECT_ROOT / ".env",
+            BACKEND_DIR / ".env",
+        ),
+        env_file_encoding="utf-8",
+        extra="ignore",
+        case_sensitive=False,
+        populate_by_name=True,
+    )
 
     # ------------------------------------------------------------------
     # Derived helpers
@@ -139,7 +177,57 @@ class Settings(BaseSettings):
 
     @property
     def ai_configured(self) -> bool:
-        return bool(self.ai_enabled and self.ai_api_key and self.ai_base_url and self.ai_model)
+        return bool(self.ai_enabled and self.resolved_ai_api_key and self.resolved_ai_base_url)
+
+    # ---------------- GLM 解析（GLM_* 优先，兼容 AI_*） ----------------
+    @staticmethod
+    def _secret_text(value: object) -> str:
+        """读取密钥明文；同时兼容 SecretStr 与测试里直接赋的普通字符串。"""
+        if value is None:
+            return ""
+        getter = getattr(value, "get_secret_value", None)
+        if callable(getter):
+            return str(getter()).strip()
+        return str(value).strip()
+
+    @property
+    def resolved_ai_api_key(self) -> str:
+        """实际使用的密钥明文。**只在发起请求时读取，禁止打印或记录。**"""
+        for candidate in (self.glm_api_key, self.ai_api_key):
+            value = self._secret_text(candidate)
+            if value:
+                return value
+        return ""
+
+    @property
+    def resolved_ai_base_url(self) -> str:
+        return (self._secret_text(self.glm_base_url) or self._secret_text(self.ai_base_url) or "").strip()
+
+    @property
+    def text_model(self) -> str:
+        return (self._secret_text(self.glm_text_model) or self._secret_text(self.ai_model) or "").strip()
+
+    @property
+    def vision_model(self) -> str:
+        return self._secret_text(self.glm_vision_model)
+
+    @property
+    def vision_configured(self) -> bool:
+        return bool(self.ai_enabled and self.resolved_ai_api_key and self.vision_model)
+
+    def ai_status_public(self) -> dict[str, object]:
+        """对外暴露的智能服务状态。
+
+        只包含布尔值与模型名：**绝不**包含密钥、密钥前缀、后缀或长度。
+        """
+        return {
+            "enabled": bool(self.ai_enabled),
+            "configured": self.ai_configured,
+            "available": self.ai_configured,
+            "provider": "zhipu-glm" if self.glm_api_key is not None else "openai-compatible",
+            "text_model": self.text_model or None,
+            "vision_model": self.vision_model or None,
+        }
 
     def ensure_runtime_dirs(self) -> None:
         for path in (self.upload_path, self.log_path):

@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests import fixtures_api as api_fx
-from tests.conftest import login, register
+from tests.conftest import login, provision_user, register
 
 
 @pytest.fixture
@@ -21,7 +21,7 @@ def merchant_with_event(merchant_client: TestClient):
 def consultant_client(app):
     with TestClient(app) as client:
         client.headers.update({"X-Requested-With": "XMLHttpRequest"})
-        register(client, username="consultant_a", display_name="咨询小李", roles=["consultant"])
+        provision_user(username="consultant_a", display_name="咨询小李", roles=["consultant"])
         login(client, username="consultant_a")
         yield client
 
@@ -113,7 +113,7 @@ class TestFieldWhitelist:
     def test_shared_amount_matches_event(self, merchant_with_event):
         client, _, event_ids = merchant_with_event
         case = create_case(client, event_ids["API-SETTLE-0001"])
-        assert case["shared_fields"]["amount_cents"] == 2200_00
+        assert case["shared_fields"]["amount_cents"] == 2000_00
         assert case["shared_fields"]["event_version"] == 1
 
     def test_resolution_fields_are_sanitised(self, merchant_with_event, consultant_client):
@@ -284,9 +284,9 @@ class TestApplyUpdate:
         assert "变更" in (stale["stale_reason"] or "")
 
         after = client.get("/api/v1/analysis/today").json()
-        # 结算款从 2200 元下调到 1000 元后，最紧张时点余额降到留底水平，可提用金额归零
-        assert after["max_withdrawable_cents"] == 0
-        assert after["limiting_balance_cents"] == 600_00
+        # 结算款从 2000 元下调到 1000 元后，最紧张时点余额降到 800 元，可提用金额从 1200 降到 200
+        assert after["max_withdrawable_cents"] == 200_00
+        assert after["limiting_balance_cents"] == 800_00
         assert after["max_withdrawable_cents"] != before["max_withdrawable_cents"]
 
     def test_revision_history_records_consultation_source(
@@ -405,7 +405,7 @@ class TestConsultationMeta:
     def test_list_with_status_filter(self, merchant_with_event):
         client, _, event_ids = merchant_with_event
         create_case(client, event_ids["API-SETTLE-0001"])
-        create_case(client, event_ids["API-SETTLE-0002"], submit=False)
+        create_case(client, event_ids["API-RENT-0001"], submit=False)
 
         submitted = client.get("/api/v1/consultations", params={"status": "submitted"}).json()
         assert submitted["meta"]["total"] == 1

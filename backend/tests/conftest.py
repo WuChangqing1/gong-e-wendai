@@ -112,3 +112,53 @@ def second_merchant_client(app):
         assert response.status_code == 201, response.text
         assert login(other, username="merchant_b").status_code == 200
         yield other
+
+
+def provision_user(
+    *,
+    username: str,
+    roles: list[str],
+    display_name: str = "内部账户",
+    password: str = DEFAULT_PASSWORD,
+) -> None:
+    """直接写入一个指定角色的账户。
+
+    公开注册只允许 ``merchant`` 与 ``family_member``；咨询人员与管理员必须由
+    管理员创建或由安全脚本创建。测试要模拟「管理员已经开通好这个账户」，
+    因此这里直接在数据库层创建，等价于 ``scripts/provision_admin.py`` 的路径。
+    """
+    from app.core.database import SessionLocal
+    from app.core.security import hash_password as _hash
+    from app.models.user import User, UserRole
+
+    db = SessionLocal()
+    try:
+        existing = db.query(User).filter(User.username == username).one_or_none()
+        if existing is not None:
+            return
+        user = User(
+            username=username,
+            display_name=display_name[:64],
+            password_hash=_hash(password),
+            status="active",
+        )
+        user.roles = [UserRole(role=role) for role in roles]
+        db.add(user)
+        db.commit()
+    finally:
+        db.close()
+
+
+@pytest.fixture
+def consultant_client(app):
+    """已登录的咨询人员客户端。
+
+    咨询人员不能自助注册，因此这里按「管理员已开通」的方式创建账户。
+    """
+    provision_user(
+        username="consultant_a", roles=["consultant"], display_name="咨询小李"
+    )
+    with TestClient(app) as client:
+        client.headers.update({CSRF_HEADER: CSRF_HEADER_VALUE})
+        assert login(client, username="consultant_a").status_code == 200
+        yield client

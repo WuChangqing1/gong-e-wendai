@@ -16,19 +16,38 @@
 ```
 经营数据
   ↓ 现金事件标准化（金额一律转为整数分）
-  ↓ 未来 7 天资金时点推演（逐事件扫描余额曲线）
+  ↓ 未来 7 天资金时点推演（逐事件扫描余额曲线，含期初时点）
   ↓ 计算当前最大可提用金额
   ↓ 定位最紧张资金时点与限制原因
   ↓ 需要更正时进入版本系统（不覆盖历史）
   ↓ 全部重新计算
 ```
 
-在现金流决策之上有两条协同链：
+**期初时点参与约束**（引擎 2.0.0 的核心修正）：
 
-| 协同链 | 解决的问题 |
+```
+T = { 期初时点 } ∪ { 每个事件之后的时点 } ∪ { 窗口结束时点 }
+max_withdrawable = max(0, min_{t∈T}(余额(t) − 留底))
+```
+
+用户是在“现在”把钱拿走，所以 `opening − x ≥ buffer` 必须立刻成立。
+由此保证：**未来收入不能提前提用**，把收款往后挪或提高留底都不会提高上限。
+
+主回归算例：期初 3600、留底 600，进货款 −1400、结算款 +2000、房租 −1800、
+退款 −600 → 按时可提用 **1200**；结算延迟 2 天 → `PAYMENT_GAP`，
+付款缺口 **200**、留底缺口 **800**（两者绝不相加）。
+
+在现金流决策之上有三条增强链与两条协同链：
+
+| 模块 | 解决的问题 |
 | --- | --- |
+| **日常收付预测** | 接下来 7 个自然日的日常到账与采购参考（不计入今天可提用金额） |
+| **结算延期压力** | 如果这笔结算再晚几天，付款与留底会怎样 |
+| **经营留底建议** | 按历史经验误差给出留底建议，由商户确认后生效 |
 | **家庭协同** | 经营资金与家庭资金高度关联，但家庭共同决策者不一定同时在现场 |
 | **经营咨询** | 某笔结算/到账/经营资金事项不明确时，商户整理最小必要信息发起咨询，收到结果后更正现金事件并重算 |
+
+详细口径见 [`docs/enhancement-v2.md`](docs/enhancement-v2.md)。
 
 ---
 
@@ -172,23 +191,54 @@ cd D:\CodingData\Github\GongHangCup\gong-e-wendai\backend
 python -m pytest
 ```
 
-回归算例（`backend/tests/fixtures_cash.py`）锁定产品口径：
+共 **492 项**，覆盖现金引擎、分析接口、现金事件、CSV 导入、家庭协同、
+经营咨询、权限、智能服务、增强模块、参考一致性。
 
-| 口径 | 可提用金额 | 最紧时点余额 |
-| --- | --- | --- |
-| 按时到账 | 1200.00 元 | 1800.00 元 |
-| 到账延迟 | 0.00 元 | -400.00 元（付款缺口 400 元） |
-| 共同约束 | 0.00 元 | 取最保守上限 |
+主回归算例（`backend/tests/fixtures_cash.py`）锁定产品口径：
+期初 3600 元、留底 600 元，进货款 −1400、结算款 +2000、房租 −1800、退款 −600。
+
+| 口径 | 状态 | 可提用金额 | 最紧时点余额 | 付款 / 留底缺口 |
+| --- | --- | --- | --- | --- |
+| 按当前计划 | `FEASIBLE` | 1200.00 元 | 1800.00 元 | 0 / 0 |
+| 结算延迟 2 天 | `PAYMENT_GAP` | 0.00 元 | −200.00 元 | 200 / 800 |
+| 共同约束 | `PAYMENT_GAP` | 0.00 元 | 取最保守上限 | 200 / 800 |
+| 期初 600 / 留底 600 + 只有收入 | `FEASIBLE` | 0.00 元 | 600.00 元 | 0 / 0 |
+| 期初 500 / 留底 600 + 只有收入 | `BELOW_BUFFER` | 0.00 元 | 500.00 元 | 0 / 100 |
+
+`backend/tests/test_reference_parity.py` 将 Python 引擎与
+`reference/wendai-enhancements/` 的参考内核逐分对照（54 项），
+参考包只作为计算规范与人工标准答案来源，**不是**第二套线上金额计算源。
 
 ### 5.2 前端
 
 ```powershell
 cd D:\CodingData\Github\GongHangCup\gong-e-wendai\frontend
-npm run test          # Vitest
-npm run lint          # ESLint
+npm run test          # Vitest（27 项）
+npm run lint          # ESLint（--max-warnings 0）
 npm run typecheck     # TypeScript strict
-npm run test:e2e      # Playwright（需先启动前后端）
+npm run test:e2e      # Playwright（36 项，需先启动前后端）
 ```
+
+端到端测试默认指向 `http://127.0.0.1:8000`（同源单端口生产形态），
+也可指向子路径部署：
+
+```powershell
+$env:E2E_BASE_URL="https://ccqspace.site/wendai"
+npm run test:e2e
+```
+
+咨询工作台界面用例需要管理员凭据，通过环境变量提供：
+`E2E_ADMIN_USERNAME` / `E2E_ADMIN_PASSWORD`；未提供时该用例跳过
+（服务端权限已由后端测试覆盖）。
+
+### 5.3 推送前必须执行
+
+```powershell
+conda activate gonghangcup
+python scripts\check_secrets.py
+```
+
+发现密钥或禁止入库的文件时**只输出路径**，并以非零退出码失败。
 
 ---
 
@@ -288,26 +338,33 @@ SQLite 模式保持 **1 worker**，避免高并发写入冲突。
 
 ---
 
-## 8. AI Provider 配置
+## 8. 智能服务配置（智谱 GLM）
 
-AI 是**辅助能力**，不是核心链路的一部分。
+智能服务是**辅助能力**，不是核心链路的一部分。
 
 ```env
 AI_ENABLED=true
-AI_API_KEY=sk-...
-AI_BASE_URL=https://your-openai-compatible-endpoint/v1
-AI_MODEL=your-model-name
-AI_TIMEOUT_SECONDS=30
+GLM=<智谱 API Key>
+GLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4/
+GLM_TEXT_MODEL=glm-4.5-air
+GLM_VISION_MODEL=glm-4.6v
+GLM_TIMEOUT_SECONDS=30
+GLM_VISION_TIMEOUT_SECONDS=45
 ```
 
-- 使用 OpenAI-compatible HTTP API，业务代码只依赖 `AIService`
-  （`extract_cash_event` / `explain_analysis` / `draft_consultation`），
-  不出现厂商 SDK、厂商 URL、厂商模型名
-- API Key **只存在后端环境变量**，绝不下发前端
-- AI 关闭 / 无 Key / 超时 / HTTP 500 / 返回非法 JSON 时，
+- 能力：`extract_cash_event_from_text` / `extract_cash_event_from_image` /
+  `explain_analysis` / `draft_consultation`；业务代码只依赖 `AIService`，
+  Provider 配置集中管理，不出现厂商 SDK
+- 密钥使用 `SecretStr` 保存，**只存在后端环境变量**，绝不下发前端，
+  也不出现在日志、Traceback、`/ai/status` 或 `/health` 中
+- 推送前必须执行 `python scripts/check_secrets.py`
+- AI 关闭 / 无 Key / 超时 / HTTP 500 / 返回非法 JSON / 供应商异常时，
   登录、事件管理、CSV、现金流计算、家庭协同、经营咨询**全部不受影响**，
-  前端提示「智能服务暂时不可用，请手动完成当前操作。」
-- AI 提取结果**不能直接入库**，必须经用户确认
+  前端提示「智能服务暂时不可用，你仍可以手动完成当前操作」
+- AI 提取结果**不能直接入库**，必须经用户核对金额与时间后确认
+- 图片只在内存与私有目录处理，不写入公开静态资源
+
+详见 [`docs/glm-integration.md`](docs/glm-integration.md)。
 
 ---
 

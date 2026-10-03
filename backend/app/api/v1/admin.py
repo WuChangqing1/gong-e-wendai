@@ -10,15 +10,17 @@ from sqlalchemy.orm import Session
 from app.api.deps import client_ip, require_admin
 from app.core.config import settings
 from app.core.database import check_database, get_db
-from app.core.errors import NotFound, ValidationFailed
+from app.core.errors import Conflict, NotFound, ValidationFailed
+from app.core.security import hash_password
 from app.models.cash import AnalysisResult, CashEvent
 from app.models.consultation import AuditLog, ConsultationCase
 from app.models.household import Household
 from app.models.merchant import MerchantProfile
-from app.models.user import ROLE_ADMIN, User
-from app.repositories.user_repo import AuditService
+from app.models.user import ALL_ROLES, ROLE_ADMIN, ROLE_MERCHANT, User
+from app.repositories.user_repo import AuditService, UserRepository
 from app.schemas.common import Page, PageMeta
-from app.schemas.user import UserPublic
+from app.schemas.user import USERNAME_PATTERN, UserPublic
+from app.services.merchant_service import MerchantService
 from app.utils.timeutil import utcnow
 
 router = APIRouter(prefix="/admin", tags=["系统管理"])
@@ -34,6 +36,19 @@ class OverviewOut(BaseModel):
     ai_enabled: bool
     app_env: str
     version: str
+
+
+class AdminUserCreateIn(BaseModel):
+    """管理员创建账户。咨询人员只能通过这里创建。"""
+
+    username: str = Field(min_length=4, max_length=32, pattern=USERNAME_PATTERN)
+    password: str = Field(min_length=8, max_length=128)
+    display_name: str = Field(min_length=1, max_length=64)
+    roles: list[str] = Field(min_length=1)
+    phone: str | None = Field(default=None, max_length=32)
+    email: str | None = Field(default=None, max_length=255)
+    business_name: str | None = Field(default=None, max_length=128)
+    business_type: str | None = Field(default=None, max_length=64)
 
 
 class RuntimeOut(BaseModel):
@@ -119,6 +134,71 @@ def list_users(
             total=total,
             total_pages=(total + page_size - 1) // page_size if total else 0,
         ),
+    )
+
+
+@router.post("/users", response_model=UserPublic, status_code=201, summary="创建账户")
+def create_user(
+    payload: AdminUserCreateIn,
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> UserPublic:
+    """由管理员创建账户。
+
+    公开注册只允许经营主体与家庭成员，因此**咨询人员与管理员只能在这里创建**。
+    管理员不得给自己追加角色，也不能创建第二个管理员以外的越权角色。
+    """
+    username = payload.username.strip().lower()
+    if UserRepository(db).exists(username):
+        raise Conflict(
+            "该用户名已被使用，请更换后重试",
+            code="USERNAME_TAKEN",
+            details={"field": "username"},
+        )
+    if not payload.roles:
+        raise ValidationFailed("至少需要指定一个角色", code="ROLE_REQUIRED")
+    unknown = [item for item in payload.roles if item not in ALL_ROLES]
+    if unknown:
+        raise ValidationFailed(
+            "不支持的业务角色",
+            code="UNKNOWN_ROLE",
+            details={"roles": unknown},
+        )
+
+    user = UserRepository(db).create(
+        username=username,
+        password_hash=hash_password(payload.password),
+        display_name=payload.display_name,
+        roles=list(dict.fromkeys(payload.roles)),
+        phone=payload.phone,
+        email=payload.email,
+    )
+    if payload.business_name and ROLE_MERCHANT in payload.roles:
+        MerchantService(db).ensure_profile(
+            user=user,
+            business_name=payload.business_name,
+            business_type=payload.business_type or "个体工商户",
+            phone=payload.phone,
+        )
+    AuditService(db).record(
+        "admin.user_created",
+        actor=admin,
+        resource_type="user",
+        resource_id=user.id,
+        metadata={"username": user.username, "roles": list(payload.roles)},
+        ip_address=client_ip(request),
+    )
+    db.commit()
+    db.refresh(user)
+    return UserPublic(
+        id=user.id,
+        username=user.username,
+        display_name=user.display_name,
+        status=user.status,
+        roles=user.role_names(),
+        created_at=user.created_at,
+        last_login_at=user.last_login_at,
     )
 
 

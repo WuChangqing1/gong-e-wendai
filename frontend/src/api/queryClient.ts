@@ -47,4 +47,8 @@ export const queryKeys = {
   consultantQueue: (params: Record<string, unknown>) =>
     ['consultations', 'queue', params] as const,
   aiStatus: ['ai', 'status'] as const,
+  enhancementOverview: (params: Record<string, unknown> = {}) =>
+    ['enhancements', 'overview', params] as const,
+  dailyHistory: ['history', 'daily'] as const,
+  settlementRecords: ['settlement-records'] as const,
 };

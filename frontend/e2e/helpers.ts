@@ -119,7 +119,7 @@ export async function registerMerchant(
   return { username, displayName, businessName };
 }
 
-/** 建立固定算例：期初 600 元、留底 600 元、三笔未来事项。 */
+/** 建立固定算例：期初 3600 元、留底 600 元、四笔未来事项。 */
 export async function seedFixture(
   request: APIRequestContext,
   user: FixtureUser,
@@ -129,7 +129,7 @@ export async function seedFixture(
   const snapshot = await request.post(apiUrl('account', 'snapshots'), {
     headers: CSRF,
     data: {
-      opening_balance_cents: 60_000,
+      opening_balance_cents: 360_000,
       pending_settlement_cents: 0,
       snapshot_at: base.toISOString(),
     },
@@ -142,34 +142,46 @@ export async function seedFixture(
   });
   expect(profile.status()).toBe(200);
 
+  // 与后端 fixtures_cash 主回归算例一致：
+  //   3600 -> 2200(进货款) -> 4200(结算款) -> 2400(房租) -> 1800(退款)
+  //   最小余额 1800，可提用 1200
   const events = [
     {
+      cash_key: 'E2E-BUY-0001',
+      title: '进货款',
+      direction: 'outflow',
+      amount_cents: 140_000,
+      scheduled_at: dayIso(1, 8, base),
+      event_type: 'supplier_payment',
+      source_label: '采购合同 HT-2026-011',
+    },
+    {
       cash_key: 'E2E-SETTLE-0001',
-      title: '商户结算款',
+      title: '结算款',
       direction: 'inflow',
-      amount_cents: 220_000,
-      scheduled_at: dayIso(1, 2, base),
+      amount_cents: 200_000,
+      scheduled_at: dayIso(2, 9, base),
       event_type: 'settlement',
       source_label: '结算通知 8821',
       note: '尾号 8821 结算款',
     },
     {
-      cash_key: 'E2E-PAY-0001',
-      title: '供应商货款',
+      cash_key: 'E2E-RENT-0001',
+      title: '房租',
       direction: 'outflow',
-      amount_cents: 100_000,
-      scheduled_at: dayIso(2, 2, base),
-      event_type: 'supplier_payment',
-      source_label: '采购合同 HT-2025-018',
+      amount_cents: 180_000,
+      scheduled_at: dayIso(2, 18, base),
+      event_type: 'rent',
+      source_label: '租赁合同 ZL-2026-03',
     },
     {
-      cash_key: 'E2E-SETTLE-0002',
-      title: '平台结算款',
-      direction: 'inflow',
-      amount_cents: 70_000,
-      scheduled_at: dayIso(5, 2, base),
-      event_type: 'settlement',
-      source_label: '平台账单',
+      cash_key: 'E2E-REFUND-0001',
+      title: '已确认退款',
+      direction: 'outflow',
+      amount_cents: 60_000,
+      scheduled_at: dayIso(3, 10, base),
+      event_type: 'refund',
+      source_label: '退款单 TK-2026-007',
     },
   ];
 

@@ -43,6 +43,7 @@ EVENT_TYPES = (
     "sale_receipt",
     "supplier_payment",
     "rent",
+    "refund",
     "payroll",
     "utility",
     "tax",
@@ -223,5 +224,7 @@ class AnalysisResult(Base, TimestampMixin):
     events_version_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     is_stale: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
     stale_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    engine_version: Mapped[str] = mapped_column(String(16), default="1.0.0", nullable=False)
+    #: 生成该结果的引擎版本。2.0.0 之前的结果一律视为 stale：
+    #: 旧口径把期初点排除在提用上限之外，结论不可继续作为决策依据。
+    engine_version: Mapped[str] = mapped_column(String(16), default="2.0.0", nullable=False)
     created_by: Mapped[str | None] = mapped_column(String(36), nullable=True)

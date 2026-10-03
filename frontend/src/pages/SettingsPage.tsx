@@ -492,8 +492,12 @@ export default function SettingsPage() {
           </span>
         </div>
         <div className="gew-kv-list__row">
-          <span className="gew-kv-list__key">服务模型</span>
-          <span className="gew-kv-list__value">{aiQuery.data?.model ?? '未配置'}</span>
+          <span className="gew-kv-list__key">文字识别模型</span>
+          <span className="gew-kv-list__value">{aiQuery.data?.text_model ?? '未配置'}</span>
+        </div>
+        <div className="gew-kv-list__row">
+          <span className="gew-kv-list__key">截图识别模型</span>
+          <span className="gew-kv-list__value">{aiQuery.data?.vision_model ?? '未配置'}</span>
         </div>
         <div className="gew-kv-list__row">
           <span className="gew-kv-list__key">密钥位置</span>
@@ -507,7 +511,8 @@ export default function SettingsPage() {
         </InlineNote>
       </div>
       <div style={{ marginTop: 12 }}>
-        <Tag bordered={false}>智能录入</Tag>
+        <Tag bordered={false}>文字智能录入</Tag>
+        <Tag bordered={false}>截图智能录入</Tag>
         <Tag bordered={false}>帮我讲清楚</Tag>
         <Tag bordered={false}>咨询描述整理</Tag>
       </div>

@@ -12,12 +12,12 @@ test.describe('现金事件', () => {
     await loginViaUi(page, fixture.user.username);
     await gotoAuthed(page, '/events');
 
-    await expect(page.getByText('商户结算款')).toBeVisible();
-    await expect(page.getByText('供应商货款')).toBeVisible();
-    await expect(page.getByText('平台结算款')).toBeVisible();
+    await expect(page.getByText('结算款', { exact: true }).first()).toBeVisible();
+    await expect(page.getByText('进货款', { exact: true }).first()).toBeVisible();
+    await expect(page.getByText('已确认退款', { exact: true }).first()).toBeVisible();
     await expect(page.getByText('计划中收入')).toBeVisible();
 
-    await page.getByPlaceholder('搜索事项名称、编号、备注').fill('供应商');
+    await page.getByPlaceholder('搜索事项名称、编号、备注').fill('进货款');
     await page.keyboard.press('Enter');
     await expect(page.getByText('共 1 条')).toBeVisible({ timeout: 15_000 });
   });
@@ -76,7 +76,7 @@ test.describe('现金事件', () => {
     await loginViaUi(page, fixture.user.username);
     await gotoAuthed(page, '/events');
 
-    const row = page.getByRole('row', { name: /供应商货款/ });
+    const row = page.getByRole('row', { name: /进货款/ });
     await row.getByRole('button').nth(0).click();
     await page.getByLabel('金额（元）').fill('1500');
     await btn(page, '保存修改').click();
@@ -86,7 +86,9 @@ test.describe('现金事件', () => {
     await expect(page.getByText(/当前版本 v2/)).toBeVisible({ timeout: 15_000 });
 
     await gotoAuthed(page, '/today');
-    await expect(page.locator('.gew-hero__amount')).toContainText('700', { timeout: 25_000 });
+    // 进货款从 1400 调到 1500 后：3600-1500=2100 → +2000=4100 → -1800=2300 → -600=1700
+    // 最小余额 1700，可提用 1700-600=1100
+    await expect(page.locator('.gew-hero__amount')).toContainText('1,100', { timeout: 25_000 });
   });
 
   test('来源抽屉可追溯到原始内容', async ({ page, request }) => {
@@ -94,12 +96,12 @@ test.describe('现金事件', () => {
     await loginViaUi(page, fixture.user.username);
     await gotoAuthed(page, '/events');
 
-    const row = page.getByRole('row', { name: /供应商货款/ });
+    const row = page.getByRole('row', { name: /进货款/ });
     await row.getByRole('button').nth(1).click();
     await expect(page.getByText('来源与追踪')).toBeVisible();
     await expect(page.getByText('来源记录').first()).toBeVisible();
     await expect(page.getByText('原始内容')).toBeVisible();
-    await expect(page.getByText(/采购合同 HT-2025-018/).first()).toBeVisible();
+    await expect(page.getByText(/采购合同 HT-2026-011/).first()).toBeVisible();
   });
 
   test('版本抽屉展示历史版本但不覆盖', async ({ page, request }) => {
@@ -107,18 +109,18 @@ test.describe('现金事件', () => {
     await loginViaUi(page, fixture.user.username);
     await gotoAuthed(page, '/events');
 
-    const row = page.getByRole('row', { name: /供应商货款/ });
+    const row = page.getByRole('row', { name: /进货款/ });
     await row.getByRole('button').nth(0).click();
     await page.getByLabel('金额（元）').fill('1500');
     await btn(page, '保存修改').click();
     await btn(page, '确认修改').click();
     await expect(page.getByText(/当前版本 v2/)).toBeVisible({ timeout: 15_000 });
 
-    const updated = page.getByRole('row', { name: /供应商货款/ });
+    const updated = page.getByRole('row', { name: /进货款/ });
     await updated.getByRole('button').nth(2).click();
     await expect(page.getByText('版本历史')).toBeVisible();
     await expect(page.getByText('影响金额计算').first()).toBeVisible();
-    await expect(page.getByText(/¥1,?000\.00/).first()).toBeVisible();
+    await expect(page.getByText(/¥1,?400\.00/).first()).toBeVisible();
     await expect(page.getByText(/¥1,?500\.00/).first()).toBeVisible();
   });
 
@@ -127,13 +129,13 @@ test.describe('现金事件', () => {
     await loginViaUi(page, fixture.user.username);
     await gotoAuthed(page, '/events');
 
-    const row = page.getByRole('row', { name: /商户结算款/ });
+    const row = page.getByRole('row', { name: /结算款/ });
     await row.getByRole('button').nth(3).click();
     await btn(page, '确认取消').click();
     await expect(page.getByText('事项已取消，历史记录仍然保留')).toBeVisible({ timeout: 15_000 });
 
     await gotoAuthed(page, '/today');
-    await expect(page.locator('.gew-hero__amount')).toContainText('0', { timeout: 25_000 });
+    await expect(page.locator('.gew-hero__amount')).toContainText('200', { timeout: 25_000 });
   });
 });
 
@@ -159,12 +161,12 @@ test.describe('情景分析', () => {
     await btn(page, '新建情景').click();
     await page.getByLabel('情景名称').fill('结算推迟到第 5 天');
     await page.getByLabel('要调整的事项').click();
-    await page.getByTitle(/商户结算款/).click();
+    await page.getByTitle(/结算款/).click();
     await btn(page, '创建情景').click();
     await expect(page.getByText('情景已创建')).toBeVisible({ timeout: 15_000 });
 
     await gotoAuthed(page, '/events');
-    await expect(page.getByRole('row', { name: /商户结算款/ })).toContainText('¥2,200.00');
+    await expect(page.getByRole('row', { name: /结算款/ })).toContainText('¥2,000.00');
   });
 });
 

@@ -80,12 +80,24 @@ C(t) = opening_balance + Σ Δk
 ### 3.3 最大可提用金额
 
 ```
-x* = min( min_{t ∈ 未来受约束时点} C(t) ) - buffer
+T = { snapshot_at } ∪ { 每个窗口内事件之后的时点 } ∪ { window_end }
+headroom(t) = C(t) - buffer
+x* = min_{t ∈ T} headroom(t)
 max_withdrawable = max(0, x*)
 ```
 
-期初余额不参与 `x*` 的计算，但单独输出 `balance_floor_cents = minimum_balance_cents`，
-用于判断「即使不提用也达不到留底」。
+**期初时点必须参与竞争。** 用户是在 `snapshot_at` 这一刻把钱拿走，因此
+拿走 `x` 之后必须立刻满足 `opening - x >= buffer`。若期初点不参与，
+未来才到账的收入会错误地抬高今天可以拿走的额度。
+
+由此得到三条不可违背的性质：
+
+* 未来收入不能提前提用（期初 600 / 留底 600 + 只有未来收入 → 可提用 0）
+* 把收款往后挪不会提高上限
+* 提高留底不会提高上限
+
+未来没有事件时，期初点本身就是唯一约束，`max_withdrawable = opening - buffer`；
+只有输入确实不完整时才返回 `null`。
 
 输入不完整（缺金额、缺时间、方向/状态非法、事项编号重复、事项未确认）时：
 
@@ -103,11 +115,22 @@ buffer_gap  = max(0, buffer - minimum_balance)
 
 两者分别计算，**不可相加**（留底缺口本身已经包含了付款缺口）。
 
+主回归算例：期初 3600、留底 600，进货款 −1400、结算款 +2000、房租 −1800、
+退款 −600。按时最小余额 1800 → 可提用 **1200**；结算延迟 2 天后最小余额 −200 →
+`PAYMENT_GAP`，付款缺口 **200**、留底缺口 **800**（不是 1000）。
+
 ### 3.5 状态优先级
 
 ```
-INPUT_INCOMPLETE > PAYMENT_GAP > BELOW_BUFFER > OK
+INPUT_INCOMPLETE > PAYMENT_GAP > BELOW_BUFFER > FEASIBLE
 ```
+
+`OK` 仅为历史数据的读取兼容值；引擎版本 `ENGINE_VERSION = "2.0.0"`，
+旧版本结果一律标记 `stale`。
+
+共同约束模式下，顶层 `status`、`status_label` 与两个缺口字段必须来自同一口径：
+顶层缺口取所有情景中最严重的那个，文案取状态对应的文案。**不允许**出现
+「状态=付款缺口、缺口=0、文案=资金安排可行」这种组合。
 
 ### 3.6 情景
 
@@ -119,6 +142,35 @@ INPUT_INCOMPLETE > PAYMENT_GAP > BELOW_BUFFER > OK
 | `scenarios` | 分别计算多个自定义情景，取最保守上限 |
 
 情景通过 `Scenario` + `ScenarioEventOverride` 表达，**不修改真实现金事件**。
+
+## 3A. 资金增强模块
+
+三个模块装配在确定性账本之上，**不改变**金额计算规则：
+
+| 模块 | 文件 | 职责 |
+| --- | --- | --- |
+| 日常收付预测 | `forecast_engine.py` | `seasonal_naive` / `weekday_median` / `ses` |
+| 结算延期压力 | `settlement_pressure.py` | 手动延迟 + 已完成样本经验延迟 |
+| 留底建议 | `reserve_advisor.py` | 7 天窗口内最大累计不利误差 → 经验分位数 |
+| 装配与失效 | `enhancement_service.py` | revision、`basis_hash`、留底确认、结果留档 |
+
+强制边界：
+
+* 预测 `provenance=forecast`、`confirmed=false`，永远不能转换为已确认 `CashEvent`
+* 预测金额不能加入期初、计划中收入，不能提高 `max_withdrawable`，不能修复 `PAYMENT_GAP`
+* API 中 `forecast_affects_withdrawable` 恒为 `false`
+* 留底建议不自动生效，不自动降低现有留底；确认必须由用户点击触发
+
+失效链：
+
+```
+CashEvent 金额/日期/状态/方向变化 → ledger_revision + 1 ┐
+历史数据或结算记录变化        → history_revision + 1 ┘
+                              ↓
+        basis_hash 变化 → EnhancementRun 标 stale
+                       → 留底确认返回 409 STALE_RESERVE_ADVICE
+                       → 旧 AnalysisResult 标 stale 并重算
+```
 
 ## 4. 版本与来源
 
@@ -154,16 +206,31 @@ AI 负责：理解、提取、整理、解释、表达。
 
 确定性引擎负责：金额、时间约束、余额、最大可提用金额、付款缺口、留底缺口、状态。
 
+默认供应商：智谱 GLM。文本任务用 `glm-4.5-air`，视觉任务用 `glm-4.6v`。
+详见 `docs/glm-integration.md`。
+
 硬性约束（在 `ai_service.py` 中实现并有测试覆盖）：
 
 * 不得重新计算最大可提用金额或修改引擎结果
-* 不得猜测未知金额或时间：提取出的金额若无法在原文中找到，判定为猜测并清空
+* 不得猜测未知金额或时间：文本提取出的金额若无法在原文中找到，判定为猜测并清空；
+  截图提取出的金额保留为候选值但**必须**要求用户与截图核对
+* 非正数金额（模型看不清时返回 0）一律清空并要求手动填写
 * 不得进行信用评分、违约预测、贷款建议或收入预测
 * 不得直接写入未确认的现金事件
 * 解释文本中出现的、与输入不一致的新金额会被后端过滤
 
-AI 关闭 / 无 Key / 超时 / HTTP 500 / 非法 JSON：统一返回 `503 AI_UNAVAILABLE`，
-核心功能不受影响。
+能力：
+
+| 方法 | 说明 |
+| --- | --- |
+| `extract_cash_event_from_text` | 粘贴文字 → 结构化事项 |
+| `extract_cash_event_from_image` | 上传截图 → 结构化事项 |
+| `explain_analysis` | 把确定性结论讲清楚 |
+| `draft_consultation` | 整理咨询描述（只用白名单字段） |
+
+AI 关闭 / 无 Key / 超时 / HTTP 500 / 非法 JSON / 供应商异常：统一返回
+`503 AI_UNAVAILABLE`，提示「智能服务暂时不可用，你仍可以手动完成当前操作」，
+核心功能不受影响。图片只在内存与私有目录处理，不进入公开静态资源。
 
 ## 7. 外部系统扩展点
 

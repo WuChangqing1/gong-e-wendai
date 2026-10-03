@@ -1,11 +1,15 @@
 """在目标环境创建一套固定的演示账号（幂等，可重复执行）。
 
+**仅限演示 / 开发环境。** 本脚本会创建固定密码的账号，因此在生产运行时
+（``APP_ENV=production``）会被直接拒绝。生产管理员必须通过
+``scripts/provision_admin.py`` 创建，密码由脚本随机生成且不打印到终端。
+
 用法::
 
-    PYTHONPATH=backend .venv/bin/python /tmp/gew_make_accounts.py
+    PYTHONPATH=backend python scripts/setup_demo_accounts.py
 
 账号（密码统一 Wendai2025）：
-* wangzhanggui  经营者 + 管理员
+* wangzhanggui  经营者（**不再**附带管理员角色）
 * wangtaitai    家庭成员（已加入王家小院，邀请码 DEVDEMO1）
 * zixunxiaoli   咨询人员
 
@@ -20,12 +24,26 @@ from datetime import timedelta
 
 sys.path.insert(0, os.path.join(os.path.expanduser("~"), "apps/gong-e-wendai/backend"))
 
+
+def _guard_environment() -> None:
+    """生产环境直接拒绝执行：固定密码账号不得进入正式环境。"""
+    env = (os.environ.get("APP_ENV") or "").strip().lower()
+    if env in {"production", "prod"}:
+        print(
+            "拒绝在 production 环境生成固定密码的演示账号。"
+            "如需管理员，请使用 scripts/provision_admin.py。",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
+
+_guard_environment()
+
 from app.core.database import SessionLocal  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
 from app.models.household import Household, HouseholdMembership  # noqa: E402
 from app.models.merchant import BusinessAccountSnapshot, MerchantProfile  # noqa: E402
 from app.models.user import (  # noqa: E402
-    ROLE_ADMIN,
     ROLE_CONSULTANT,
     ROLE_FAMILY_MEMBER,
     ROLE_MERCHANT,
@@ -37,7 +55,9 @@ from app.utils.timeutil import utcnow  # noqa: E402
 PASSWORD = "Wendai2025"
 
 ACCOUNTS = [
-    ("wangzhanggui", "王掌柜", [ROLE_MERCHANT, ROLE_ADMIN]),
+    # 经营者账号：**不再**附加 admin 角色。
+    # 管理员必须是彼此独立的账户，不能因为某个账号是经营者就顺带获得管理权限。
+    ("wangzhanggui", "王掌柜", [ROLE_MERCHANT]),
     ("wangtaitai", "王太太", [ROLE_FAMILY_MEMBER]),
     ("zixunxiaoli", "咨询小李", [ROLE_CONSULTANT]),
 ]

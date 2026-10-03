@@ -99,12 +99,44 @@ api_key / authorization / cookie / secret
 
 ## 11. 智能服务密钥
 
-* `AI_API_KEY` 只存在于后端环境变量（`.env` / 服务单元），**从不下发前端**
-* `/api/v1/ai/status` 只返回 `enabled` / `configured` / `available` / `model`，不返回密钥
-* 前端没有任何界面可以查看或获取 API Key
-* 智能服务日志只记录状态码与失败原因，不记录请求体中的原文
+* `GLM` 只存在于后端环境变量（`.env` / 服务单元），**从不下发前端**
+* 在 Pydantic 中使用 `SecretStr`，不会出现在 `repr`、日志或 Traceback 里
+* `/api/v1/ai/status` 只返回 `enabled` / `configured` / `available` / `provider` /
+  `text_model` / `vision_model`，**不返回**密钥、前缀、后缀或长度
+* `/api/v1/health` 同样不包含密钥
+* 前端没有任何界面可以查看或获取密钥
+* 调用日志只记录模型、模态与 token 用量，不记录请求体中的原文，
+  也不记录完整 prompt 与完整 response
+* 密钥只允许出现在：本机进程内存、服务器 `.env.production`（`chmod 600`）、
+  发往智谱官方接口的 `Authorization` 头
+* 推送前必须执行 `scripts/check_secrets.py`；它会扫描受版本控制的文件、
+  暂存区与工作区未提交文件，发现密钥时**只输出文件路径**
 
-## 12. 前端不泄露开发信息
+## 12. 分享与咨询的服务端白名单
+
+* 家庭分享数据包由**服务端**白名单生成，只有商户勾选的字段才会生成
+* 事项级字段（`event_title` / `event_amount_cents` / `event_scheduled_at` /
+  `event_version`）必须显式勾选 `key_payments` 或 `revision_summary`
+* 接收端只能读取持久化后的过滤 payload，不能根据 `cash_event_id` 补全未共享字段
+* 这是后端 JSON 层面的事实，**不是**前端隐藏
+* 咨询数据包独立白名单，永远不包含家庭信息、经营留底、可提用金额、完整余额曲线
+
+## 13. 角色与注册
+
+* 公开注册只允许 `merchant` 与 `family_member`
+* `consultant` 只能由管理员通过 `POST /admin/users` 开通
+* `admin` 只能由已有管理员或 `scripts/provision_admin.py` 创建（密码随机生成，
+  写入 `0600` 文件，不打印到终端）
+* 经营者账号不会因为普通经营身份自动获得 `admin`
+* 管理接口不允许商户访问；管理员管理运行状态时不默认获得商户完整金融数据
+
+## 14. 历史数据的完整性
+
+* 缺失的自然日**不会**被静默当作 0：必须在导入时明确确认
+  「该日期范围内的数据完整；没有记录的日期代表当天确实没有对应收付」
+* 结算历史统计只使用 `completed` 样本；`open` 单独计数，绝不当成 0 天延迟
+
+## 15. 前端不泄露开发信息
 
 页面不出现：
 
@@ -113,9 +145,9 @@ localhost / 开发服务器地址 / Python Traceback / SQL 错误
 内部文件路径 / 模型 API Key / 数据库路径
 ```
 
-智能服务不可用时只显示：「智能服务暂时不可用，请手动完成当前操作。」
+智能服务不可用时只显示：「智能服务暂时不可用，你仍可以手动完成当前操作」
 
-## 13. Git 与凭据
+## 16. Git 与凭据
 
 `.gitignore` 排除：
 
@@ -126,11 +158,15 @@ uploads/ / logs/ / backups/ / data/
 node_modules/ / .venv/ / __pycache__/
 ```
 
-`.env.production`、JWT Secret、AI Key、数据库与上传文件均不进入 Git。
+例外：`backend/tests/data/` 中的固定参考向量属于源码，必须入库。
 
-## 14. 生产运行
+`.env.production`、JWT Secret、GLM Key、数据库与上传文件均不进入 Git。
+
+## 17. 生产运行
 
 * 单应用实例、单 worker（配合 SQLite）
 * SQLite 启用 `WAL`、`foreign_keys`、`busy_timeout`、`synchronous=NORMAL`
-* 只开放 TCP 18082；前端与 API 同源，不需要额外端口
-* 定期备份：`scripts/backup_db.py`
+* 应用只监听 `127.0.0.1:18089`，由 Nginx 在 `0.0.0.0:18088` 上反向代理，
+  对外通过 `https://ccqspace.site/wendai/` 访问
+* 迁移前必须备份：`scripts/backup_db.py`
+* 部署顺序：备份 → `alembic upgrade head` → 重启服务（先迁移后重启）

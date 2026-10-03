@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests import fixtures_api as api_fx
-from tests.conftest import DEFAULT_PASSWORD, login, register
+from tests.conftest import DEFAULT_PASSWORD, login, provision_user, register
 
 DECISION_FIELDS = ["max_withdrawable", "limiting_point", "risk_summary", "key_payments"]
 
@@ -73,7 +73,7 @@ class TestHousehold:
         assert second.status_code == 409
 
     def test_consultant_cannot_create_household(self, client: TestClient):
-        register(client, username="con_hh", roles=["consultant"])
+        provision_user(username="con_hh", roles=["consultant"])
         client.cookies.clear()
         login(client, username="con_hh")
         assert client.post("/api/v1/households", json={"name": "x"}).status_code == 403
@@ -328,7 +328,7 @@ class TestCards:
 
     def test_risk_card_contains_gap(self, family):
         analysis = family["client"].post(
-            "/api/v1/analysis/run", json={"mode": "delayed", "delay_days": 8}
+            "/api/v1/analysis/run", json={"mode": "delayed", "delay_days": 2}
         ).json()
         card = family["client"].post(
             "/api/v1/household-cards",
@@ -338,10 +338,26 @@ class TestCards:
                 "analysis_result_id": analysis["id"],
             },
         ).json()
-        assert card["payload"]["payment_gap_cents"] == 400_00
+        assert card["payload"]["payment_gap_cents"] == 200_00
         assert "缺口" in card["payload"]["risk_summary"]
 
     def test_revision_card_links_event(self, family):
+        event_id = family["client"].get("/api/v1/cash-events").json()["items"][0]["id"]
+        card = family["client"].post(
+            "/api/v1/household-cards",
+            json={
+                "card_type": "revision",
+                # 事项级字段必须显式勾选才会进入 payload
+                "shared_fields": ["revision_summary"],
+                "cash_event_id": event_id,
+            },
+        ).json()
+        assert card["card_type"] == "revision"
+        assert card["cash_event_id"] == event_id
+        assert card["payload"]["event_version"] == 1
+
+    def test_revision_card_without_event_fields_hides_them(self, family):
+        """未勾选事项字段时，事项级内容不得出现在 payload 或标题里。"""
         event_id = family["client"].get("/api/v1/cash-events").json()["items"][0]["id"]
         card = family["client"].post(
             "/api/v1/household-cards",
@@ -351,9 +367,14 @@ class TestCards:
                 "cash_event_id": event_id,
             },
         ).json()
-        assert card["card_type"] == "revision"
-        assert card["cash_event_id"] == event_id
-        assert card["payload"]["event_version"] == 1
+        for forbidden in (
+            "event_title",
+            "event_amount_cents",
+            "event_scheduled_at",
+            "event_version",
+        ):
+            assert forbidden not in card["payload"], forbidden
+        assert card["title"] == "事项变更通知"
 
     def test_owner_can_update_planned_amount(self, family):
         analysis = family["client"].post("/api/v1/analysis/run", json={"mode": "current_plan"}).json()
@@ -442,7 +463,7 @@ class TestFamilyPrivacy:
         assert response.status_code == 403
 
     def test_consultant_cannot_read_household(self, client: TestClient, family):
-        register(client, username="con_privacy", roles=["consultant"])
+        provision_user(username="con_privacy", roles=["consultant"])
         client.cookies.clear()
         login(client, username="con_privacy")
         # 咨询人员不是经营主体，没有家庭上下文

@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests import fixtures_api as api_fx
+from tests.conftest import provision_user
 
 BASE_PAYLOAD = {
     "title": "门店租金",
@@ -76,17 +77,20 @@ class TestList:
         api_fx.setup_merchant(merchant_client)
         inflows = merchant_client.get("/api/v1/cash-events", params={"direction": "inflow"})
         assert inflows.status_code == 200
-        assert inflows.json()["meta"]["total"] == 2
+        assert inflows.json()["meta"]["total"] == 1
         assert all(item["direction"] == "inflow" for item in inflows.json()["items"])
 
+        outflows = merchant_client.get("/api/v1/cash-events", params={"direction": "outflow"})
+        assert outflows.json()["meta"]["total"] == 3
+
         scheduled = merchant_client.get("/api/v1/cash-events", params={"state": "scheduled"})
-        assert scheduled.json()["meta"]["total"] == 3
+        assert scheduled.json()["meta"]["total"] == 4
 
     def test_search_by_title(self, merchant_client: TestClient):
         api_fx.setup_merchant(merchant_client)
-        response = merchant_client.get("/api/v1/cash-events", params={"search": "供应商"})
+        response = merchant_client.get("/api/v1/cash-events", params={"search": "进货款"})
         assert response.json()["meta"]["total"] == 1
-        assert response.json()["items"][0]["title"] == "供应商货款"
+        assert response.json()["items"][0]["title"] == "进货款"
 
     def test_pagination(self, merchant_client: TestClient):
         api_fx.setup_merchant(merchant_client)
@@ -94,17 +98,17 @@ class TestList:
             "/api/v1/cash-events", params={"page": 2, "page_size": 2}
         )
         meta = response.json()["meta"]
-        assert meta["total"] == 3
+        assert meta["total"] == 4
         assert meta["page"] == 2
-        assert len(response.json()["items"]) == 1
+        assert len(response.json()["items"]) == 2
 
     def test_stats(self, merchant_client: TestClient):
         api_fx.setup_merchant(merchant_client)
         stats = merchant_client.get("/api/v1/cash-events/stats").json()
-        assert stats["total"] == 3
-        assert stats["scheduled"] == 3
-        assert stats["inflow_cents"] == 2900_00
-        assert stats["outflow_cents"] == 1000_00
+        assert stats["total"] == 4
+        assert stats["scheduled"] == 4
+        assert stats["inflow_cents"] == 2000_00
+        assert stats["outflow_cents"] == 3800_00
 
 
 class TestUpdateAndRevision:
@@ -228,7 +232,7 @@ class TestSourceTracing:
         _, event_ids = api_fx.setup_merchant(merchant_client)
         analysis = merchant_client.get("/api/v1/analysis/today").json()
         limiting_id = analysis["limiting_event_id"]
-        assert limiting_id == event_ids["API-PAY-0001"]
+        assert limiting_id == event_ids["API-REFUND-0001"]
 
         event = merchant_client.get(f"/api/v1/cash-events/{limiting_id}").json()
         assert event["id"] == limiting_id
@@ -288,7 +292,7 @@ class TestOwnershipIsolation:
         assert listing["meta"]["total"] == 0
 
     def test_family_member_cannot_access_events(self, client: TestClient):
-        from tests.conftest import login, register
+        from tests.conftest import login, provision_user, register
 
         register(client, username="fam_only", roles=["family_member"])
         client.cookies.clear()
@@ -298,7 +302,7 @@ class TestOwnershipIsolation:
     def test_consultant_cannot_access_events(self, client: TestClient):
         from tests.conftest import login, register
 
-        register(client, username="con_only", roles=["consultant"])
+        provision_user(username="con_only", roles=["consultant"])
         client.cookies.clear()
         login(client, username="con_only")
         assert client.get("/api/v1/cash-events").status_code == 403

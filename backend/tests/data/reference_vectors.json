@@ -1,0 +1,168 @@
+{
+  "_source": "reference/wendai-enhancements/wendai-enhancements-v1/core/cash-engine.mjs",
+  "_note": "由参考内核 evaluate() 与 docs/人工标准答案.md 固化的人工标准答案。Python 引擎必须逐分一致。金额单位：分。时间：UTC ISO8601。",
+  "_coordinate": {
+    "asOf": "2026-10-01T12:00:00+00:00",
+    "window_days": 7,
+    "beijing_note": "asOf = 北京时间 2026-10-01 20:00"
+  },
+  "vectors": [
+    {
+      "name": "3600 按时计划",
+      "opening_cents": 360000,
+      "buffer_cents": 60000,
+      "events": [
+        {"key": "purchase", "delta_cents": -140000, "at": "2026-10-02T08:00:00+08:00"},
+        {"key": "settlement", "delta_cents": 200000, "at": "2026-10-03T09:00:00+08:00"},
+        {"key": "rent", "delta_cents": -180000, "at": "2026-10-03T18:00:00+08:00"},
+        {"key": "refund", "delta_cents": -60000, "at": "2026-10-04T10:00:00+08:00"}
+      ],
+      "expected": {
+        "status": "FEASIBLE",
+        "max_withdrawable_cents": 120000,
+        "payment_gap_cents": 0,
+        "buffer_gap_cents": 0,
+        "minimum_balance_cents": 180000,
+        "end_balance_cents": 180000,
+        "limiting_event": "refund"
+      }
+    },
+    {
+      "name": "3600 结算延迟到 D4",
+      "opening_cents": 360000,
+      "buffer_cents": 60000,
+      "events": [
+        {"key": "purchase", "delta_cents": -140000, "at": "2026-10-02T08:00:00+08:00"},
+        {"key": "settlement", "delta_cents": 200000, "at": "2026-10-05T09:00:00+08:00"},
+        {"key": "rent", "delta_cents": -180000, "at": "2026-10-03T18:00:00+08:00"},
+        {"key": "refund", "delta_cents": -60000, "at": "2026-10-04T10:00:00+08:00"}
+      ],
+      "expected": {
+        "status": "PAYMENT_GAP",
+        "max_withdrawable_cents": 0,
+        "payment_gap_cents": 20000,
+        "buffer_gap_cents": 80000,
+        "minimum_balance_cents": -20000,
+        "end_balance_cents": 180000,
+        "limiting_event": "refund",
+        "gaps_are_not_additive": true
+      }
+    },
+    {
+      "name": "期初 600 留底 600 只有未来收入",
+      "opening_cents": 60000,
+      "buffer_cents": 60000,
+      "events": [
+        {"key": "settlement", "delta_cents": 500000, "at": "2026-10-04T12:00:00+08:00"}
+      ],
+      "expected": {
+        "status": "FEASIBLE",
+        "max_withdrawable_cents": 0,
+        "payment_gap_cents": 0,
+        "buffer_gap_cents": 0,
+        "minimum_balance_cents": 60000,
+        "end_balance_cents": 560000,
+        "limiting_is_opening": true
+      }
+    },
+    {
+      "name": "期初 500 留底 600 只有未来收入",
+      "opening_cents": 50000,
+      "buffer_cents": 60000,
+      "events": [
+        {"key": "settlement", "delta_cents": 500000, "at": "2026-10-04T12:00:00+08:00"}
+      ],
+      "expected": {
+        "status": "BELOW_BUFFER",
+        "max_withdrawable_cents": 0,
+        "payment_gap_cents": 0,
+        "buffer_gap_cents": 10000,
+        "minimum_balance_cents": 50000,
+        "end_balance_cents": 550000,
+        "limiting_is_opening": true
+      }
+    },
+    {
+      "name": "同一时刻先支出后收入",
+      "opening_cents": 60000,
+      "buffer_cents": 60000,
+      "events": [
+        {"key": "pay", "delta_cents": -170000, "at": "2026-10-03T09:00:00+08:00"},
+        {"key": "receive", "delta_cents": 170000, "at": "2026-10-03T09:00:00+08:00"}
+      ],
+      "expected": {
+        "status": "PAYMENT_GAP",
+        "max_withdrawable_cents": 0,
+        "payment_gap_cents": 110000,
+        "buffer_gap_cents": 170000,
+        "minimum_balance_cents": -110000,
+        "end_balance_cents": 60000
+      }
+    },
+    {
+      "name": "期初 0 单笔付款形成缺口",
+      "opening_cents": 0,
+      "buffer_cents": 60000,
+      "events": [
+        {"key": "rent", "delta_cents": -20000, "at": "2026-10-03T12:00:00+08:00"}
+      ],
+      "expected": {
+        "status": "PAYMENT_GAP",
+        "max_withdrawable_cents": 0,
+        "payment_gap_cents": 20000,
+        "buffer_gap_cents": 80000,
+        "minimum_balance_cents": -20000,
+        "end_balance_cents": -20000
+      }
+    },
+    {
+      "name": "留底提高到 800 后按时上限降到 1000",
+      "opening_cents": 360000,
+      "buffer_cents": 80000,
+      "events": [
+        {"key": "purchase", "delta_cents": -140000, "at": "2026-10-02T08:00:00+08:00"},
+        {"key": "settlement", "delta_cents": 200000, "at": "2026-10-03T09:00:00+08:00"},
+        {"key": "rent", "delta_cents": -180000, "at": "2026-10-03T18:00:00+08:00"},
+        {"key": "refund", "delta_cents": -60000, "at": "2026-10-04T10:00:00+08:00"}
+      ],
+      "expected": {
+        "status": "FEASIBLE",
+        "max_withdrawable_cents": 100000,
+        "payment_gap_cents": 0,
+        "buffer_gap_cents": 0,
+        "minimum_balance_cents": 180000,
+        "end_balance_cents": 180000
+      }
+    },
+    {
+      "name": "无未来事件时期初点即约束",
+      "opening_cents": 100000,
+      "buffer_cents": 60000,
+      "events": [],
+      "expected": {
+        "status": "FEASIBLE",
+        "max_withdrawable_cents": 40000,
+        "payment_gap_cents": 0,
+        "buffer_gap_cents": 0,
+        "minimum_balance_cents": 100000,
+        "end_balance_cents": 100000,
+        "limiting_is_opening": true
+      }
+    }
+  ],
+  "joint": {
+    "name": "按当前计划 + 结算延迟",
+    "expected": {
+      "status": "PAYMENT_GAP",
+      "max_withdrawable_cents": 0,
+      "note": "不得描述为「0 元满足所有情景」"
+    }
+  },
+  "forecast_isolation": {
+    "name": "预测收入放大 10 倍不影响确定性上限",
+    "deterministic_max_withdrawable_cents": 120000,
+    "forecast_multiplier": 10,
+    "expected_max_withdrawable_cents": 120000,
+    "forecast_affects_withdrawable": false
+  }
+}

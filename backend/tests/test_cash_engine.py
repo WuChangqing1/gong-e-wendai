@@ -104,8 +104,10 @@ class TestDirectionAndState:
         assert result.window_outflow_cents == 500_00
 
     def test_included_in_opening_not_counted(self):
-        result = _run(fx.included_in_opening_events(), opening=fx.OPENING_BALANCE_CENTS)
-        assert result.end_balance_cents == fx.OPENING_BALANCE_CENTS
+        result = _run(
+            fx.included_in_opening_events(), opening=fx.MAIN_OPENING_BALANCE_CENTS
+        )
+        assert result.end_balance_cents == fx.MAIN_OPENING_BALANCE_CENTS
         assert "already-in-opening" in result.excluded_event_ids
         assert result.window_inflow_cents == 0
 
@@ -113,7 +115,7 @@ class TestDirectionAndState:
         event = _event(state="cancelled", amount_cents=900_00)
         result = _run([event], opening=1000_00)
         assert result.end_balance_cents == 1000_00
-        assert result.status is AnalysisStatus.OK
+        assert result.status is AnalysisStatus.FEASIBLE
 
     def test_zero_amount_event(self):
         result = _run([_event(amount_cents=0)], opening=1000_00)
@@ -224,7 +226,7 @@ class TestGaps:
         result = _run([_event(direction="outflow", amount_cents=100_00)], opening=100_00, buffer=0)
         assert result.payment_gap_cents == 0
         assert result.buffer_gap_cents == 0
-        assert result.status is AnalysisStatus.OK
+        assert result.status is AnalysisStatus.FEASIBLE
 
 
 # ---------------------------------------------------------------------------
@@ -256,18 +258,39 @@ class TestIncomplete:
 # 空事件 / 零值
 # ---------------------------------------------------------------------------
 class TestEmptyAndZero:
-    def test_empty_events(self):
+    def test_empty_events_still_yields_constraint(self):
+        """期初与留底都已确认时，没有未来事项本身就是一个合法约束点。"""
         result = _run([], opening=1000_00, buffer=600_00)
-        assert result.max_withdrawable_cents is None
+        assert result.max_withdrawable_cents == 400_00
+        assert result.status is AnalysisStatus.FEASIBLE
         assert result.end_balance_cents == 1000_00
         assert result.points[0].is_opening
+        assert result.limiting_timestamp == fx.SNAPSHOT_AT
+        assert result.minimum_future_balance_cents is None
+
+    def test_empty_events_at_buffer_yields_zero(self):
+        result = _run([], opening=600_00, buffer=600_00)
+        assert result.max_withdrawable_cents == 0
+        assert result.status is AnalysisStatus.FEASIBLE
+
+    def test_empty_events_below_buffer(self):
+        result = _run([], opening=100_00, buffer=600_00)
+        assert result.max_withdrawable_cents == 0
+        assert result.status is AnalysisStatus.BELOW_BUFFER
+        assert result.buffer_gap_cents == 500_00
+
+    def test_incomplete_input_alone_blocks_calculation(self):
+        """只有资料不完整时才返回 None，而不是「没有未来事项」。"""
+        result = _run([_event(amount_cents=None)], opening=1000_00, buffer=600_00)
+        assert result.max_withdrawable_cents is None
+        assert result.status is AnalysisStatus.INPUT_INCOMPLETE
 
     def test_zero_balance_zero_buffer(self):
         result = _run([], opening=0, buffer=0)
         assert result.minimum_balance_cents == 0
         assert result.payment_gap_cents == 0
         assert result.buffer_gap_cents == 0
-        assert result.status is AnalysisStatus.OK
+        assert result.status is AnalysisStatus.FEASIBLE
 
     def test_opening_below_buffer_reports_floor(self):
         result = _run([], opening=100_00, buffer=600_00)
@@ -275,6 +298,83 @@ class TestEmptyAndZero:
         assert result.opening_covers_buffer is False
         assert result.buffer_gap_cents == 500_00
         assert result.status is AnalysisStatus.BELOW_BUFFER
+
+
+# ---------------------------------------------------------------------------
+# 期初时点参与约束（2.0.0 的核心修正）
+# ---------------------------------------------------------------------------
+class TestOpeningPointConstraint:
+    """期初点必须与未来时点一起参与最大可提用金额的竞争。"""
+
+    def test_future_income_cannot_be_withdrawn_today(self):
+        """期初 600 / 留底 600 + 只有未来收入 -> 可行但可提用 0。"""
+        result = run_engine(
+            fx.future_income_only_input(
+                opening_balance_cents=fx.OPENING_EXACT_BUFFER_CENTS
+            )
+        )
+        assert result.max_withdrawable_cents == 0
+        assert str(result.status) == fx.EXPECTED_OPENING_EXACT_BUFFER_STATUS
+        assert result.limiting_timestamp == fx.SNAPSHOT_AT
+        assert result.end_balance_cents == fx.OPENING_EXACT_BUFFER_CENTS + fx.FUTURE_INCOME_ONLY_CENTS
+
+    def test_opening_below_buffer_with_future_income(self):
+        """期初 500 / 留底 600 + 只有未来收入 -> BELOW_BUFFER 且可提用 0。"""
+        result = run_engine(
+            fx.future_income_only_input(
+                opening_balance_cents=fx.OPENING_BELOW_BUFFER_CENTS
+            )
+        )
+        assert result.max_withdrawable_cents == 0
+        assert str(result.status) == fx.EXPECTED_OPENING_BELOW_BUFFER_STATUS
+        assert result.buffer_gap_cents == fx.EXPECTED_OPENING_BELOW_BUFFER_BUFFER_GAP
+        assert result.payment_gap_cents == 0
+
+    def test_delaying_income_never_raises_limit(self):
+        """同一组事项只把收入后移，上限不得提高。"""
+        early = run_engine(
+            fx.future_income_only_input(
+                opening_balance_cents=fx.OPENING_EXACT_BUFFER_CENTS,
+                income_at=fx.day(2, 9),
+            )
+        )
+        late = run_engine(
+            fx.future_income_only_input(
+                opening_balance_cents=fx.OPENING_EXACT_BUFFER_CENTS,
+                income_at=fx.day(6, 9),
+            )
+        )
+        assert early.max_withdrawable_cents == 0
+        assert late.max_withdrawable_cents == 0
+        assert late.max_withdrawable_cents <= early.max_withdrawable_cents  # type: ignore[operator]
+
+    def test_raising_buffer_never_raises_limit(self):
+        base = run_engine(fx.on_time_input_with_buffer(fx.MAIN_BUFFER_CENTS))
+        raised = run_engine(fx.on_time_input_with_buffer(fx.RAISED_BUFFER_CENTS))
+        assert base.max_withdrawable_cents == 1200_00
+        assert raised.max_withdrawable_cents == fx.EXPECTED_RAISED_BUFFER_WITHDRAWABLE
+        assert raised.max_withdrawable_cents < base.max_withdrawable_cents  # type: ignore[operator]
+
+    def test_raised_buffer_does_not_resolve_delay_gap(self):
+        """提高留底不会消灭资金缺口。"""
+        result = run_engine(
+            EngineInput(
+                opening_balance_cents=fx.MAIN_OPENING_BALANCE_CENTS,
+                buffer_cents=fx.RAISED_BUFFER_CENTS,
+                snapshot_at=fx.SNAPSHOT_AT,
+                events=fx.main_events(settlement_at=fx.SETTLEMENT_DELAYED_AT),
+                label="结算延迟",
+            )
+        )
+        assert result.status is AnalysisStatus.PAYMENT_GAP
+        assert result.payment_gap_cents == fx.EXPECTED_RAISED_BUFFER_DELAYED_PAYMENT_GAP
+        assert result.buffer_gap_cents == fx.EXPECTED_RAISED_BUFFER_DELAYED_BUFFER_GAP
+        assert result.max_withdrawable_cents == 0
+
+    def test_no_future_events_uses_opening(self):
+        result = run_engine(fx.no_future_events_input())
+        assert result.max_withdrawable_cents == fx.EXPECTED_NO_EVENT_WITHDRAWABLE
+        assert str(result.status) == fx.EXPECTED_NO_EVENT_STATUS
 
 
 # ---------------------------------------------------------------------------
@@ -303,9 +403,21 @@ class TestRegression:
         assert result.limiting_timestamp == expected["limiting_timestamp"]
         assert result.limiting_event_id == expected["limiting_event_id"]
         assert result.limiting_balance_cents == expected["limiting_balance_cents"]
-        assert result.payment_gap_cents == expected["payment_gap_cents"] == 400_00
-        assert result.buffer_gap_cents == expected["buffer_gap_cents"] == 1000_00
-        assert result.end_balance_cents == expected["end_balance_cents"]
+        assert result.payment_gap_cents == expected["payment_gap_cents"] == 200_00
+        assert result.buffer_gap_cents == expected["buffer_gap_cents"] == 800_00
+
+    def test_gaps_are_not_additive_in_main_case(self):
+        """留底缺口 800 已经包含付款缺口 200，绝不能相加成 1000。"""
+        result = run_engine(fx.delayed_input())
+        assert result.payment_gap_cents == 200_00
+        assert result.buffer_gap_cents == 800_00
+        # 两者之和（1000）不是任何一个真实缺口，只是被误加出来的数字
+        assert result.payment_gap_cents + result.buffer_gap_cents == 1000_00
+        assert result.buffer_gap_cents == max(
+            0, result.buffer_cents - result.minimum_balance_cents
+        )
+        assert result.buffer_gap_cents == max(0, -result.minimum_balance_cents) + result.buffer_cents
+        assert result.buffer_gap_cents - result.payment_gap_cents == result.buffer_cents
 
     def test_joint_constraint_withdrawable_is_zero(self):
         joint = run_joint(fx.joint_inputs())
@@ -317,10 +429,14 @@ class TestRegression:
         assert joint.max_withdrawable_cents == min(per_scenario)  # type: ignore[type-var]
 
     def test_end_balance_without_household_withdrawal(self):
+        """未提用家庭资金时，两个口径的期末余额都是 1800 元。"""
         on_time = run_engine(fx.on_time_input())
         delayed = run_engine(fx.delayed_input())
-        assert on_time.end_balance_cents == fx.EXPECTED_ON_TIME_END_BALANCE == 2500_00
-        assert delayed.end_balance_cents == fx.EXPECTED_DELAYED_END_BALANCE == 300_00
+        expected = fx.EXPECTED_ON_TIME["end_balance_cents"]
+        assert on_time.end_balance_cents == expected == 1800_00
+        assert delayed.end_balance_cents == expected
+        assert on_time.end_balance_cents == fx.EXPECTED_ON_TIME_END_BALANCE
+        assert delayed.end_balance_cents == fx.EXPECTED_DELAYED_END_BALANCE
 
     def test_after_withdrawing_1200_plan_is_exactly_at_buffer(self):
         """按时到账口径提用 1200 元后，最紧时点余额刚好等于经营留底。"""
@@ -338,8 +454,8 @@ class TestRegression:
         # 把留底提高 1 分钱等价于多提用 1 分钱
         result = run_engine(
             EngineInput(
-                opening_balance_cents=fx.OPENING_BALANCE_CENTS,
-                buffer_cents=fx.BUFFER_CENTS + 1,
+                opening_balance_cents=fx.MAIN_OPENING_BALANCE_CENTS,
+                buffer_cents=fx.MAIN_BUFFER_CENTS + 1,
                 snapshot_at=fx.SNAPSHOT_AT,
                 events=list(events),
                 label="按当前计划",
@@ -350,22 +466,24 @@ class TestRegression:
 
     def test_limiting_point_explains_amount(self):
         result = run_engine(fx.on_time_input())
-        assert result.limiting_event_title == "供应商货款"
+        assert result.limiting_event_title == "已确认退款"
+        assert result.limiting_event_id == fx.REFUND_ID
         assert result.limiting_balance_cents - result.buffer_cents == 1200_00
         assert result.limiting_reason
 
     def test_pending_inflows_at_limit_on_time(self):
-        """最紧时点是第 3 天：当时尚未到账的是第 6 天平台结算款。"""
+        """最紧时点是最后一笔支出之后，窗口内已无尚未到账的收入。"""
         result = run_engine(fx.on_time_input())
-        pending_ids = [item.event_id for item in result.pending_inflows_at_limit]
-        assert pending_ids == [fx.PLATFORM_INFLOW_ID]
-        assert result.pending_inflows_at_limit[0].amount_cents == fx.PLATFORM_INFLOW_CENTS
+        assert result.pending_inflows_at_limit == []
+        # 但窗口内的结算款收入仍然计入「待结算资金」口径
+        assert result.pending_settlement_cents == 2000_00
 
     def test_pending_inflows_at_limit_delayed(self):
-        """延迟口径下，最紧时点之后还有第 6 天到账的平台结算款。"""
+        """延迟到 D4 09:00 到账时，最紧时点（D3 10:00）之后仍有该笔结算款待入账。"""
         result = run_engine(fx.delayed_input())
         pending_ids = [item.event_id for item in result.pending_inflows_at_limit]
-        assert pending_ids == [fx.PLATFORM_INFLOW_ID]
+        assert pending_ids == [fx.SETTLEMENT_INFLOW_ID]
+        assert result.pending_inflows_at_limit[0].amount_cents == fx.SETTLEMENT_INFLOW_CENTS
 
 
 # ---------------------------------------------------------------------------
@@ -373,17 +491,19 @@ class TestRegression:
 # ---------------------------------------------------------------------------
 class TestRecompute:
     def test_amount_change_changes_result(self):
-        """把供应商货款从 1000 元提高到 1500 元：最紧时点下移到 700 元。"""
+        """把进货款从 1400 元提高到 1900 元：最紧时点下移到 1300 元。"""
         events = fx.main_events()
-        before = _run(events, opening=fx.OPENING_BALANCE_CENTS, buffer=fx.BUFFER_CENTS)
+        before = _run(
+            events, opening=fx.MAIN_OPENING_BALANCE_CENTS, buffer=fx.MAIN_BUFFER_CENTS
+        )
         changed = [
             CashEventInput(
                 id=event.id,
                 cash_key=event.cash_key,
                 title=event.title,
                 amount_cents=(
-                    fx.SUPPLIER_PAYMENT_CENTS + 500_00
-                    if event.id == fx.SUPPLIER_PAYMENT_ID
+                    fx.PURCHASE_CENTS + 500_00
+                    if event.id == fx.PURCHASE_ID
                     else event.amount_cents
                 ),
                 direction=event.direction,
@@ -392,13 +512,15 @@ class TestRecompute:
             )
             for event in events
         ]
-        after = _run(changed, opening=fx.OPENING_BALANCE_CENTS, buffer=fx.BUFFER_CENTS)
+        after = _run(
+            changed, opening=fx.MAIN_OPENING_BALANCE_CENTS, buffer=fx.MAIN_BUFFER_CENTS
+        )
         assert before.max_withdrawable_cents == 1200_00
         assert after.max_withdrawable_cents == 700_00
         assert after.end_balance_cents == before.end_balance_cents - 500_00
 
     def test_date_change_changes_limit(self):
-        """把结算款提前到快照当天：最紧时点仍是第 3 天付款，可提用金额不变。"""
+        """把结算款提前到快照当天：最紧时点仍是最后一笔支出，可提用金额不变。"""
         events = fx.main_events()
         moved = [
             CashEventInput(
@@ -414,9 +536,11 @@ class TestRecompute:
             )
             for event in events
         ]
-        after = _run(moved, opening=fx.OPENING_BALANCE_CENTS, buffer=fx.BUFFER_CENTS)
+        after = _run(
+            moved, opening=fx.MAIN_OPENING_BALANCE_CENTS, buffer=fx.MAIN_BUFFER_CENTS
+        )
         assert after.max_withdrawable_cents == 1200_00
-        assert after.limiting_event_id == fx.SUPPLIER_PAYMENT_ID
+        assert after.limiting_event_id == fx.REFUND_ID
         assert after.end_balance_cents == fx.EXPECTED_ON_TIME_END_BALANCE
 
     def test_state_change_to_cancelled_increases_gap(self):
@@ -443,8 +567,10 @@ class TestRecompute:
             )
             for event in events
         ]
-        after = _run(cancelled, opening=fx.OPENING_BALANCE_CENTS, buffer=fx.BUFFER_CENTS)
-        assert after.payment_gap_cents == 400_00
+        after = _run(
+            cancelled, opening=fx.MAIN_OPENING_BALANCE_CENTS, buffer=fx.MAIN_BUFFER_CENTS
+        )
+        assert after.payment_gap_cents == 200_00
         assert after.max_withdrawable_cents == 0
         assert after.status is AnalysisStatus.PAYMENT_GAP
 
@@ -472,13 +598,72 @@ class TestRecompute:
 class TestPendingSettlement:
     def test_pending_not_added_to_opening(self):
         result = run_engine(fx.on_time_input())
-        assert result.opening_balance_cents == 600_00
-        assert result.pending_settlement_cents == 2900_00
+        assert result.opening_balance_cents == fx.MAIN_OPENING_BALANCE_CENTS
+        assert result.pending_settlement_cents == 2000_00
         assert result.opening_balance_cents + result.pending_settlement_cents != (
             result.opening_balance_cents
         )
         # 可提用金额基于期初余额，不含待结算资金
         assert result.max_withdrawable_cents == 1200_00
+
+    def test_pending_settlement_only_counts_settlement_type(self):
+        """待结算资金只统计 settlement 类型；转入、销售收款、其他收入不算。"""
+        events = [
+            _event(
+                id="s",
+                cash_key="S",
+                direction="inflow",
+                amount_cents=1000_00,
+                event_type="settlement",
+            ),
+            _event(
+                id="t",
+                cash_key="T",
+                direction="inflow",
+                amount_cents=300_00,
+                event_type="transfer_in",
+            ),
+            _event(
+                id="r",
+                cash_key="R",
+                direction="inflow",
+                amount_cents=400_00,
+                event_type="sale_receipt",
+            ),
+            _event(
+                id="o",
+                cash_key="O",
+                direction="inflow",
+                amount_cents=200_00,
+                event_type="other_inflow",
+            ),
+            _event(
+                id="p",
+                cash_key="P",
+                direction="outflow",
+                amount_cents=500_00,
+                event_type="supplier_payment",
+            ),
+        ]
+        result = _run(events, opening=0, buffer=0)
+        assert result.window_inflow_cents == 1900_00
+        assert result.pending_settlement_cents == 1000_00
+        assert result.pending_settlement_cents != result.window_inflow_cents
+
+    def test_cancelled_settlement_not_counted_as_pending(self):
+        events = [
+            _event(
+                id="s",
+                cash_key="S",
+                direction="inflow",
+                amount_cents=1000_00,
+                event_type="settlement",
+                state="cancelled",
+            )
+        ]
+        result = _run(events, opening=0, buffer=0)
+        assert result.pending_settlement_cents == 0
+        assert result.window_inflow_cents == 0
 
 
 # ---------------------------------------------------------------------------
@@ -518,9 +703,26 @@ class TestSourceTracing:
         result = _run([_event(source_label="结算通知")])
         assert result.points[1].event_title == "事项"
 
+    def test_engine_version_is_2(self):
+        from app.services.cash_engine import ENGINE_VERSION, is_engine_version_current
+
+        assert ENGINE_VERSION == "2.0.0"
+        assert run_engine(fx.on_time_input()).engine_version == ENGINE_VERSION
+        assert is_engine_version_current(ENGINE_VERSION) is True
+        assert is_engine_version_current("1.0.0") is False
+
+    def test_legacy_ok_status_coerces_to_feasible(self):
+        """历史数据里的旧状态 OK 必须归一到 FEASIBLE，而不是被当成未知状态。"""
+        assert AnalysisStatus.coerce("OK") is AnalysisStatus.FEASIBLE
+        assert AnalysisStatus.coerce("FEASIBLE") is AnalysisStatus.FEASIBLE
+        assert AnalysisStatus.coerce("payment_gap") is AnalysisStatus.PAYMENT_GAP
+        assert AnalysisStatus.coerce("nonsense") is None
+
     def test_result_payload_is_serialisable(self):
         payload = run_engine(fx.on_time_input()).to_dict()
         import json
 
         assert json.loads(json.dumps(payload, ensure_ascii=False))
         assert payload["points"][0]["is_opening"] is True
+        assert payload["status"] == "FEASIBLE"
+        assert payload["engine_version"] == "2.0.0"

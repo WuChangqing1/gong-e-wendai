@@ -15,13 +15,24 @@
 * ``inflow``  -> ``+amount``
 * ``outflow`` -> ``-amount``
 
+受约束时点集合 ``T`` = { 期初时点 ``snapshot_at`` } ∪ { 窗口内每个事件之后的时点 }
+∪ { 窗口结束时点 }。
+
 最大可提用金额（用户今日从经营资金中拿给家庭使用的金额 ``x``）::
 
-    x* = min( min_{t in 未来受约束时点} C(t) ) - buffer
+    headroom(t) = C(t) - buffer
+    x* = min_{t in T} headroom(t)
     max_withdrawable = max(0, x*)
 
-期初余额不再参与 ``x*`` 的计算：期初资金本身已经“可用”，不构成对未来付款的
-约束；同时输出 ``balance_floor_cents`` 给出“即使不提用也达不到留底”的提示。
+**期初时点必须参与竞争**：用户是在 ``snapshot_at`` 这一刻就把钱拿走，因此拿走 ``x``
+之后立刻要满足 ``opening - x >= buffer``。若期初点不参与，未来才到账的收入会反过来
+把今天可以提前拿走的额度抬高，这是错误的。
+
+因此：
+
+* 未来没有事件时，期初点本身就是唯一约束，``max_withdrawable = opening - buffer``；
+  只有资料确实不完整时才返回 ``None``。
+* 任意时点的余额都不会因为把收款往后挪而变高，所以「延迟收入」不可能提高上限。
 """
 
 from __future__ import annotations
@@ -34,10 +45,12 @@ from typing import Any, Iterable, Sequence
 from app.utils.money import format_cny, sum_cents
 from app.utils.timeutil import WINDOW_DAYS, to_utc
 
-ENGINE_VERSION = "1.0.0"
+ENGINE_VERSION = "2.0.0"
 
 DIRECTION_INFLOW = "inflow"
 DIRECTION_OUTFLOW = "outflow"
+
+EVENT_TYPE_SETTLEMENT = "settlement"
 
 STATE_SCHEDULED = "scheduled"
 STATE_INCLUDED_IN_OPENING = "included_in_opening"
@@ -51,14 +64,33 @@ MATERIAL_FIELDS = ("amount_cents", "scheduled_at", "direction", "state")
 
 
 class AnalysisStatus(StrEnum):
-    OK = "OK"
+    """统一后的四种分析状态。
+
+    ``OK`` 为 2.0.0 之前的旧值，仅用于读取历史数据时做兼容映射，
+    新计算一律产出 ``FEASIBLE``。
+    """
+
+    FEASIBLE = "FEASIBLE"
     PAYMENT_GAP = "PAYMENT_GAP"
     BELOW_BUFFER = "BELOW_BUFFER"
     INPUT_INCOMPLETE = "INPUT_INCOMPLETE"
 
+    @classmethod
+    def coerce(cls, value: object) -> AnalysisStatus | None:
+        """把历史数据中的状态值映射到当前枚举；无法识别时返回 ``None``。"""
+        if isinstance(value, cls):
+            return value
+        raw = str(value or "").strip().upper()
+        if raw == "OK":
+            return cls.FEASIBLE
+        for member in cls:
+            if member.value == raw:
+                return member
+        return None
+
 
 STATUS_LABELS = {
-    AnalysisStatus.OK: "资金安排可行",
+    AnalysisStatus.FEASIBLE: "资金安排可行",
     AnalysisStatus.PAYMENT_GAP: "存在付款缺口",
     AnalysisStatus.BELOW_BUFFER: "低于经营留底",
     AnalysisStatus.INPUT_INCOMPLETE: "资料不完整",
@@ -186,6 +218,9 @@ class EngineResult:
     opening_covers_buffer: bool
     window_inflow_cents: int
     window_outflow_cents: int
+    #: 窗口内「计划中的结算款」收入合计。
+    #: 与 :attr:`window_inflow_cents`（未来 7 天全部计划收入）不是同一个口径，
+    #: 不得互相代替。
     pending_settlement_cents: int
     points: list[BalancePoint]
     validation_errors: list[dict[str, Any]] = field(default_factory=list)
@@ -194,8 +229,13 @@ class EngineResult:
 
     # ------------------------------------------------------------------
     @property
+    def is_feasible(self) -> bool:
+        return self.status is AnalysisStatus.FEASIBLE
+
+    @property
     def is_ok(self) -> bool:
-        return self.status is AnalysisStatus.OK
+        """向后兼容别名，等价于 :attr:`is_feasible`。"""
+        return self.is_feasible
 
     @property
     def status_label(self) -> str:
@@ -338,7 +378,15 @@ def run_engine(data: EngineInput) -> EngineResult:
     window_outflow = sum_cents(
         event.amount_cents or 0 for event in in_window if event.direction == DIRECTION_OUTFLOW
     )
-    pending_settlement = window_inflow
+    # 待结算资金只统计“结算款”这一类计划中收入。
+    # 销售收款、转入、其他收入都不属于待结算口径，不能被自动归类为结算款。
+    window_settlement = sum_cents(
+        event.amount_cents or 0
+        for event in in_window
+        if event.direction == DIRECTION_INFLOW
+        and event.state == STATE_SCHEDULED
+        and event.event_type == EVENT_TYPE_SETTLEMENT
+    )
 
     points: list[BalancePoint] = [
         BalancePoint(
@@ -382,30 +430,37 @@ def run_engine(data: EngineInput) -> EngineResult:
 
     # ------------------------------------------------------------------
     # 最大可提用金额
+    #
+    # 约束时点集合包含期初点：用户此刻就把钱拿走，所以 opening - x >= buffer
+    # 必须立刻成立。不含期初点时，未来到账的收入会错误地抬高今天的可提用金额。
     # ------------------------------------------------------------------
+    headroom_minimum = minimum_balance - buffer_cents
+    limiting_point: BalancePoint | None = next(
+        (point for point in points if point.balance_cents == minimum_balance), None
+    )
+
     if incomplete:
         max_withdrawable: int | None = None
-        limiting_point: BalancePoint | None = next(
-            (point for point in future_points if point.balance_cents == minimum_future_balance),
-            None,
-        )
         limiting_reason = "部分收付款事项的资料不完整，暂时无法给出可提用金额。"
-    elif minimum_future_balance is None:
-        max_withdrawable = None
-        limiting_point = None
-        limiting_reason = "未来 7 天内没有已确认的收付款事项，暂时无法判断提用后的资金安全。"
     else:
-        candidate = minimum_future_balance - buffer_cents
-        max_withdrawable = max(0, candidate)
-        limiting_point = next(
-            (point for point in future_points if point.balance_cents == minimum_future_balance),
-            None,
-        )
-        if candidate < 0:
+        max_withdrawable = max(0, headroom_minimum)
+        if limiting_point is not None and limiting_point.is_opening:
+            if headroom_minimum > 0:
+                limiting_reason = (
+                    "当前可用经营资金扣除经营留底后即为今日可提用金额；"
+                    "未来 7 天的收支不会再抬高这个上限。"
+                )
+            elif headroom_minimum == 0:
+                limiting_reason = (
+                    "当前可用经营资金刚好等于经营留底，今天没有可提用空间。"
+                )
+            else:
+                limiting_reason = "当前可用经营资金已经低于经营留底，今天不建议提用家庭资金。"
+        elif headroom_minimum < 0:
             limiting_reason = (
                 "未来 7 天内最紧张时点的余额低于经营留底，当前不建议提用家庭资金。"
             )
-        elif candidate == 0:
+        elif headroom_minimum == 0:
             limiting_reason = "未来 7 天内最紧张时点的余额刚好等于经营留底，没有可提用空间。"
         else:
             limiting_reason = "未来 7 天内最紧张时点的余额扣除经营留底后，即为今日可提用金额。"
@@ -417,7 +472,7 @@ def run_engine(data: EngineInput) -> EngineResult:
     buffer_gap = max(0, buffer_cents - minimum_balance)
 
     # ------------------------------------------------------------------
-    # 状态：优先级 INPUT_INCOMPLETE > PAYMENT_GAP > BELOW_BUFFER > OK
+    # 状态：优先级 INPUT_INCOMPLETE > PAYMENT_GAP > BELOW_BUFFER > FEASIBLE
     # ------------------------------------------------------------------
     if incomplete:
         status = AnalysisStatus.INPUT_INCOMPLETE
@@ -426,7 +481,7 @@ def run_engine(data: EngineInput) -> EngineResult:
     elif minimum_balance < buffer_cents:
         status = AnalysisStatus.BELOW_BUFFER
     else:
-        status = AnalysisStatus.OK
+        status = AnalysisStatus.FEASIBLE
 
     # ------------------------------------------------------------------
     # 限制时点当时的待结算收入
@@ -473,7 +528,7 @@ def run_engine(data: EngineInput) -> EngineResult:
         opening_covers_buffer=opening >= buffer_cents,
         window_inflow_cents=window_inflow,
         window_outflow_cents=window_outflow,
-        pending_settlement_cents=pending_settlement,
+        pending_settlement_cents=window_settlement,
         points=points,
         validation_errors=validation_errors,
         excluded_event_ids=excluded_ids,
@@ -531,7 +586,7 @@ def run_joint(scenarios: Sequence[EngineInput]) -> JointResult:
     elif any(item is AnalysisStatus.BELOW_BUFFER for item in statuses):
         status = AnalysisStatus.BELOW_BUFFER
     else:
-        status = AnalysisStatus.OK
+        status = AnalysisStatus.FEASIBLE
 
     return JointResult(
         scenario_results=list(results),
@@ -549,6 +604,11 @@ def events_version_hash(events: Sequence[CashEventInput]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def is_engine_version_current(engine_version: str | None) -> bool:
+    """旧引擎版本产生的分析结果不再作为当前决策依据。"""
+    return str(engine_version or "") == ENGINE_VERSION
+
+
 __all__ = [
     "AnalysisStatus",
     "BalancePoint",
@@ -556,6 +616,7 @@ __all__ = [
     "DIRECTION_INFLOW",
     "DIRECTION_OUTFLOW",
     "ENGINE_VERSION",
+    "EVENT_TYPE_SETTLEMENT",
     "EngineInput",
     "EngineResult",
     "JointResult",
@@ -566,6 +627,7 @@ __all__ = [
     "STATE_SCHEDULED",
     "STATUS_LABELS",
     "events_version_hash",
+    "is_engine_version_current",
     "run_engine",
     "run_joint",
     "validate_events",
