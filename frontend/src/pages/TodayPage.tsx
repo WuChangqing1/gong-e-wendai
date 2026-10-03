@@ -1,6 +1,6 @@
 /** 今日决策页：最大可提用金额是页面视觉中心。 */
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import {
@@ -31,7 +31,11 @@ import { merchantApi } from '@/api/auth';
 import { analysisApi, cashEventApi, type AnalysisRunPayload } from '@/api/cashflow';
 import { errorMessage } from '@/api/client';
 import { queryKeys, queryClient } from '@/api/queryClient';
-import CashflowChart from '@/components/CashflowChart';
+import {
+  AnalysisChartsPanelLazy,
+  CashflowChartLazy,
+  ChartLoading,
+} from '@/components/charts/lazy';
 import {
   DescriptionGrid,
   InlineNote,
@@ -41,7 +45,6 @@ import {
   StatusTag,
 } from '@/components/ui';
 import AiExplainPanel from '@/features/ai/AiExplainPanel';
-import AnalysisChartsPanel from '@/features/analysis/AnalysisChartsPanel';
 import EnhancementPanel from '@/features/enhancement/EnhancementPanel';
 import ShareCardDrawer from '@/features/household/ShareCardDrawer';
 import { useIsMobile } from '@/hooks/useResponsive';
@@ -214,11 +217,16 @@ export default function TodayPage() {
           </span>
         }
       >
-        <CashflowChart scenarios={scenarios} bufferCents={result.buffer_cents} />
+        {/* 图表 chunk 按需加载；Suspense 只包住图表本身，不阻塞页面其余部分 */}
+        <Suspense fallback={<ChartLoading height={320} />}>
+          <CashflowChartLazy scenarios={scenarios} bufferCents={result.buffer_cents} />
+        </Suspense>
       </SectionCard>
 
       {/* 图表化分析：每日收支与待结算到账分布 */}
-      <AnalysisChartsPanel analysis={result} compact />
+      <Suspense fallback={<ChartLoading height={520} />}>
+        <AnalysisChartsPanelLazy analysis={result} compact />
+      </Suspense>
     </>
   ) : null;
 

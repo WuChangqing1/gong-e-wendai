@@ -879,6 +879,21 @@ a:hover {
   }
 }
 
+/* ---------------- 图表懒加载占位 ---------------- */
+.gew-chart-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-sunken);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.gew-chart-loading__text {
+  opacity: 0.75;
+}
+
 /* ---------------- 手机端「我的」设置列表 ---------------- */
 .gew-settings-menu {
   background: var(--surface);

@@ -153,7 +153,25 @@ useResponsive() // → { isMobile, isTablet, isDesktop, hasRoomForSidebar }
 
 ---
 
-## 7. 视口验收
+## 7. 首屏资源
+
+手机网络的往返成本更高，因此按**路由**拆分，而不是让所有页面下载同一份大包。
+
+| 页面 | 首屏 js | chunk 数 |
+| --- | --- | --- |
+| 现金事件 / 家庭协同 / 经营咨询 / 我的 | 1630 KB（gzip 533 KB） | 1 |
+| 今日决策 / 情景分析 | 1630 KB + 按需图表（约 582 KB，gzip 196 KB） | 4 |
+
+* ECharts 由 `components/charts/lazy.tsx` 动态加载，**不带图表的页面完全不下载**
+* 图表加载期间用固定高度占位（`ChartLoading`）避免布局抖动
+* 不要在 `vite.config.ts` 里给 `echarts` 或 antd 做手动分包：
+  手动分包会生成静态 chunk 并被 `modulepreload`，反而让所有页面都下载它
+
+细节与实测对比见 `docs/v3-optimization.md` 第 5 节。
+
+---
+
+## 8. 视口验收
 
 验收宽度：**360 / 375 / 390 / 430 / 768 / 1024 / 1440**，覆盖 6 个经营者页面。
 

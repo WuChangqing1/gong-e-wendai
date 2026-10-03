@@ -1,6 +1,6 @@
 /** 情景分析页：多情景资金曲线、可提用金额与风险差异对比。 */
 
-import { useMemo, useState } from 'react';
+import { Suspense, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Alert,
@@ -29,8 +29,11 @@ import dayjs, { type Dayjs } from 'dayjs';
 import { analysisApi, cashEventApi, scenarioApi } from '@/api/cashflow';
 import { errorMessage } from '@/api/client';
 import { queryKeys } from '@/api/queryClient';
-import AnalysisChartsPanel from '@/features/analysis/AnalysisChartsPanel';
-import CashflowChart from '@/components/CashflowChart';
+import {
+  AnalysisChartsPanelLazy,
+  CashflowChartLazy,
+  ChartLoading,
+} from '@/components/charts/lazy';
 import { InlineNote, MetricCard, PageHeader, SectionCard, StatusTag } from '@/components/ui';
 import ShareCardDrawer from '@/features/household/ShareCardDrawer';
 import type { AnalysisMode, AnalysisResult, AnalysisStatus, CashEvent } from '@/types';
@@ -315,12 +318,17 @@ export default function AnalysisPage() {
             {curves.length === 0 ? (
               <Empty description="没有可展示的情景曲线" image={Empty.PRESENTED_IMAGE_SIMPLE} />
             ) : (
-              <CashflowChart scenarios={curves} bufferCents={result.buffer_cents} />
+              // 图表 chunk 按需加载；Suspense 只包住图表本身，不阻塞页面其余部分
+              <Suspense fallback={<ChartLoading height={300} />}>
+                <CashflowChartLazy scenarios={curves} bufferCents={result.buffer_cents} />
+              </Suspense>
             )}
           </SectionCard>
 
           {/* 图表化分析：每日收支、收支结构、余额变化过程、资金积累节奏、到账分布、情景对比 */}
-          <AnalysisChartsPanel analysis={result} />
+          <Suspense fallback={<ChartLoading height={520} />}>
+            <AnalysisChartsPanelLazy analysis={result} />
+          </Suspense>
 
           <SectionCard title="情景对比明细">
             <Table
