@@ -226,27 +226,52 @@ max_withdrawable_cents=0   opening_balance_cents=60000   buffer_cents=60000
 以上 C4–C7 由视觉巡检发现，C8–C10 由公网三账号逐页验收发现；
 完整清单与提交对应关系见 `docs/final-product-baseline.md` 第 6 节。
 
-### 9.6 未处理事项（需业务确认，本次未动）
+### 9.6 测试残留账号清理（2026-10-04，经业务确认后执行）
 
-生产库里除三个正式账号外，还有大量**端到端测试残留账号**：
+生产库里除三个正式账号外，其余账号都是历史验收轮次在公网入口跑端到端测试
+留下的残留（`端到端掌柜 / 端到端小吃店` 正是测试夹具写死的名称），
+以及早期脚本写中文时被 GBK 破坏成 `????` 的记录。
 
-| 项目 | 现状 |
+| 项目 | 结果 |
 | --- | --- |
-| 账号总数 | 321（active 320 / disabled 1） |
-| 显示名分布 | 端到端掌柜 270、界面注册掌柜 15、家庭成员小王 11、咨询小李 9、空数据掌柜 7、`????` 4、验收掌柜 1 |
-| 经营名称分布 | 端到端小吃店 270、登录测试店 8、空数据小店 7、界面注册小吃店 7、`?????` 3、验收小铺 1、王记小吃店 1 |
+| 执行脚本 | `scripts/purge_test_residue.py`（默认只报告，`--apply` 才写库） |
+| 清理前账号数 | 321 |
+| 清理后账号数 | **4** |
+| 删除账号 | 317（名称命中测试特征 304 / 脚本开通的咨询人员 8 / 名称乱码 5） |
+| 保留账号 | `wangzhanggui`、`wangtaitai`、`zixunxiaoli`（正式身份）、`xitongguanli`（已停用，V3 管理员移除的审计主体） |
+| 删除前备份 | `~/apps/gong-e-wendai-data/backups/app-20261004-031239-pre-purge.db` |
+| 执行方式 | 先 `systemctl --user stop`，清理完成后 `start`，`NRestarts=0` |
+| 审计留痕 | `identity.test_residue_purged`（记录删除数量、逐表行数、保护名单） |
 
-这些都是历史验收轮次在公网入口上跑 E2E 产生的（`端到端掌柜 / 端到端小吃店`
-正是测试夹具写死的名称），**不是**真实经营者。
+连带删除的行（都属于被删账号自己的测试数据）：
 
-本次**没有**做任何停用或删除：
+| 表 | 行数 |
+| --- | --- |
+| `cash_event_revisions` | 1009 |
+| `source_records` / `cash_events` | 989 / 989 |
+| `analysis_results` | 359 |
+| `merchant_profiles` / `user_roles` / `users` | 298 / 317 / 317 |
+| `merchant_analysis_states` / `business_account_snapshots` | 293 / 273 |
+| `enhancement_runs` / `consultation_updates` / `consultation_cases` | 90 / 56 / 16 |
+| `household_memberships` / `households` / `household_cards` 及子表 | 14 / 7 / 6 |
+| `scenarios` / `scenario_event_overrides` / `import_batches` / `refresh_sessions` | 8 / 8 / 12 / 547 |
 
-* 停用 300+ 个账号属于生产数据变更，需要业务方确认后才执行；
-* 库中还有 `????` / `?????` 这类乱码记录，来源不明，不能靠猜测处置；
-* 保留现状对产品功能与三个正式账号的验收结果没有任何影响。
+`audit_logs` 保持追加语义，未删除历史审计记录（2621 行）。
 
-建议的处置方式（非破坏性，与「绝不物理删除」一致）：按
-`display_name + business_name + created_at 落在验收时间窗 + 无审计业务痕迹`
-四重证据筛选后 `status=disabled`，保留账号、角色与全部历史。
+### 9.7 清理后的核对
+
+| 项目 | 结果 |
+| --- | --- |
+| 账号 | `wangzhanggui`(merchant) / `wangtaitai`(family_member) / `zixunxiaoli`(consultant) 均 active，密码与角色未变 |
+| 正式商户数据 | 资金时点 2 条（600 / 3600）、事项 10 scheduled + 4 cancelled、历史 84 天、结算 20 条、协同卡 8 张、咨询 8 条、分析结果 106 条 |
+| 孤儿检查 | 24 项（成员、收件人、事项、版本、来源、历史、结算、咨询、家庭、分析…）全部为 **0** |
+| 计算口径 | `/analysis/today` = `FEASIBLE` 可提用 120000、最紧时点 180000；joint 延迟 2 天 = `PAYMENT_GAP`，付款缺口 20000 / 留底缺口 80000，`binding_scenario_index=1` |
+| 咨询队列 | 咨询人员看到的队列从 24 条（17 个商户）收敛为 **8 条 / 1 个商户** |
+| 三账号页面 | 11 个页面全部正常（无开发口径、无内部字段名、无乱码、无横向溢出） |
+| 服务 | `active`，`NRestarts=0`，健康检查 `ok`，公网 200 |
+
+脚本先在**生产库副本**上演练：报告 → `--apply` → 逐表核对 → 24 项孤儿检查全 0，
+确认无误后才在真实库上执行。
+
 
 
