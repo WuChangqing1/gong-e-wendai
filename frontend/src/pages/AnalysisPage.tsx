@@ -212,7 +212,7 @@ export default function AnalysisPage() {
     <div className="gew-stack">
       <PageHeader
         title="情景分析"
-        subtitle="比较不同到账情况下的资金曲线与可提用上限。情景只做假设推演，不会修改真实现金事件。"
+        subtitle="比较不同到账时间下的资金变化"
         extra={
           <Space wrap>
             <Segmented
@@ -503,7 +503,7 @@ export default function AnalysisPage() {
                 render: (_value, row) => (
                   <Popconfirm
                     title="删除该情景？"
-                    description="情景只是假设推演，删除不会影响真实现金事件。"
+                    description="删除后不影响你的收付款事项。"
                     onConfirm={() => deleteMutation.mutate(row.id)}
                     okText="删除"
                     cancelText="取消"
@@ -522,17 +522,12 @@ export default function AnalysisPage() {
         items={[
           {
             key: 'notes',
-            label: '说明与口径（点击展开）',
+            label: '计算详情',
             children: (
               <div className="gew-stack">
                 <InlineNote tone="info">
-                  情景不会修改你的收付款事项。系统在计算时临时代入情景中的时间或金额调整，
-                  每次都会重新推演未来 7 天的余额曲线。共同约束模式下，你会看到一个同时满足
-                  所有情景的可提用上限——它等于各情景上限中最小的那个。
-                </InlineNote>
-                <InlineNote tone="neutral">
-                  所有金额、时间与结论都由确定性计算引擎给出；页面上的图表只是把同一份计算结果
-                  换成图形表达，不引入任何新的计算口径。
+                  共同约束模式下，你会看到一个同时满足所有情景的可提用上限——
+                  它等于各情景上限中最小的那个。
                 </InlineNote>
               </div>
             ),
@@ -579,12 +574,12 @@ export default function AnalysisPage() {
               }))}
             />
           </Form.Item>
-          <Form.Item name="scheduled_at" label="假设到账时间">
+          <Form.Item name="scheduled_at" label="到账时间">
             <DatePicker showTime format="YYYY-MM-DD HH:mm" style={{ width: '100%' }} />
           </Form.Item>
           <Form.Item
             name="amount"
-            label="假设金额（元，选填）"
+            label="金额（元，选填）"
             extra="留空表示金额不变，只调整时间。"
           >
             <InputNumber

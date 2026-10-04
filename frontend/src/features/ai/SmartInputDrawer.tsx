@@ -35,7 +35,7 @@ import { formatCny } from '@/utils/money';
 import { formatDateTime } from '@/utils/datetime';
 import { DIRECTION_LABELS, EVENT_TYPE_LABELS, STATE_LABELS } from '@/utils/labels';
 
-const EXAMPLE = '您尾号8821的商户结算款2358.60元预计10月3日完成结算。';
+const IMAGE_PLACEHOLDER = '上传结算通知、付款通知或收付款凭证截图';
 const MAX_IMAGE_MB = 5;
 const ACCEPTED_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 
@@ -179,7 +179,7 @@ export default function SmartInputDrawer({
                 rows={4}
                 value={text}
                 onChange={(event) => setText(event.target.value)}
-                placeholder={EXAMPLE}
+                placeholder="粘贴结算通知、付款通知或其他收付款信息"
                 maxLength={4000}
                 showCount
               />
@@ -193,7 +193,6 @@ export default function SmartInputDrawer({
                 >
                   整理成收付款事项
                 </Button>
-                <Button onClick={() => setText(EXAMPLE)}>使用示例文本</Button>
                 <Button type="link" onClick={() => setManualOpen(true)}>
                   改为手动录入
                 </Button>
@@ -202,8 +201,7 @@ export default function SmartInputDrawer({
           ) : (
             <>
               <Typography.Paragraph style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>
-                上传结算通知、付款通知或收付款凭证的截图，系统会读取截图里的金额与时间。
-                截图只在服务器私有目录处理，不会放到公开地址。
+                {IMAGE_PLACEHOLDER}，系统会读取截图里的金额与时间。
               </Typography.Paragraph>
 
               <Upload.Dragger

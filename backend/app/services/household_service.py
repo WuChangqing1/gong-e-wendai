@@ -43,12 +43,20 @@ from app.utils.timeutil import utcnow
 #
 # 这是**服务端**白名单：只有出现在这里的字段才可能出现在持久化的 payload 里，
 # 接收端永远只能读取过滤后的 payload，不能根据 ``cash_event_id`` 再补全未共享字段。
+#
+# 每个字段只产出下表列出的键，**不做隐式带出**：勾选「最紧张时间」不会顺带给出
+# 最紧时点余额，勾选「风险摘要」不会顺带给出缺口金额。这样「用户勾了什么」
+# 与「家人能看到什么」严格一一对应。
 SHAREABLE_FIELDS = (
     "max_withdrawable",
     "planned_amount",
     "limiting_point",
+    "limiting_balance",
+    "end_balance",
     "key_payments",
     "risk_summary",
+    "payment_gap",
+    "buffer_gap",
     "pending_inflows",
     "revision_summary",
 )
@@ -65,16 +73,43 @@ FIELD_LABELS = {
     "max_withdrawable": "今日可提用金额",
     "planned_amount": "计划家庭提用金额",
     "limiting_point": "最紧张时间",
+    "limiting_balance": "最紧时点余额",
+    "end_balance": "期末余额",
     "key_payments": "关键经营付款",
     "risk_summary": "风险摘要",
+    "payment_gap": "付款缺口",
+    "buffer_gap": "留底缺口",
     "pending_inflows": "尚未到账的收入",
     "revision_summary": "事项变更摘要",
 }
 
-#: 需要显式勾选才允许出现的「事项级」字段。
-#: 只要没有勾选 ``key_payments``，``event_title`` / ``event_amount_cents`` /
-#: ``event_scheduled_at`` / ``event_version`` 就**一个都不会生成**。
+#: 字段 → 产出的 payload 键。**逐项对应**，没有勾选就不生成。
+#: 事项级字段（event_*）只在 ``key_payments`` 下生成；``revision_summary`` 只允许
+#: 接收端知道「有一笔事项发生过变更」，不提供任何事项细节。
+SHARED_FIELD_OUTPUTS: dict[str, tuple[str, ...]] = {
+    "max_withdrawable": ("max_withdrawable_cents",),
+    "planned_amount": ("planned_household_amount_cents",),
+    "limiting_point": ("limiting_timestamp",),
+    "limiting_balance": ("limiting_balance_cents",),
+    "end_balance": ("end_balance_cents",),
+    "key_payments": ("key_payments", "limiting_event_title"),
+    "risk_summary": ("risk_summary", "status"),
+    "payment_gap": ("payment_gap_cents",),
+    "buffer_gap": ("buffer_gap_cents",),
+    "pending_inflows": ("pending_inflows",),
+    "revision_summary": (),
+}
+
+#: 事项级字段的产物；只有勾选 ``key_payments`` 才会出现。
+#: ``event_title`` / ``event_amount_cents`` / ``event_scheduled_at`` / ``event_version``
+#: 属于事项细节，不属于「变更摘要」，因此不由 ``revision_summary`` 带出。
 EVENT_FIELD_GATE = "key_payments"
+EVENT_FIELD_OUTPUTS = (
+    "event_title",
+    "event_amount_cents",
+    "event_scheduled_at",
+    "event_version",
+)
 
 MEMBERSHIP_STATUS_LABEL = {
     MEMBERSHIP_PENDING: "待确认",
@@ -260,35 +295,50 @@ class HouseholdService:
     ) -> dict:
         """按服务端白名单生成分享数据包。
 
-        关键约束：**没有勾选的字段，这里根本不会生成**。接收端只能读到这份
-        过滤后的 payload，不能通过 ``cash_event_id`` 反查补全。
+        关键约束：
+
+        * **没有勾选的字段，这里根本不会生成** —— 接收端只能读到过滤后的 payload，
+          不能通过 ``cash_event_id`` 反查补全。
+        * **逐项对应** —— 每个勾选项只产出 :data:`SHARED_FIELD_OUTPUTS` 里列出的键，
+          不做隐式带出（勾「最紧张时间」不会顺带给出最紧时点余额）。
         """
         payload: dict = {}
         fields = [item for item in shared_fields if item in SHAREABLE_FIELDS]
 
+        def wanted(field: str) -> bool:
+            return field in fields
+
         if analysis is not None:
-            if "max_withdrawable" in fields:
+            if wanted("max_withdrawable"):
                 payload["max_withdrawable_cents"] = analysis.max_withdrawable_cents
-            if "limiting_point" in fields:
-                payload["limiting_timestamp"] = (
-                    analysis.limiting_timestamp.isoformat() if analysis.limiting_timestamp else None
-                )
+
+            if wanted("limiting_point") and analysis.limiting_timestamp is not None:
+                payload["limiting_timestamp"] = analysis.limiting_timestamp.isoformat()
+
+            if wanted("limiting_balance"):
                 payload["limiting_balance_cents"] = analysis.limiting_balance_cents
-                # 最紧时点事项名称只有在同时允许分享关键付款时才给出
-                if EVENT_FIELD_GATE in fields:
-                    payload["limiting_event_title"] = self._key_payment_title(analysis)
-            if "risk_summary" in fields:
+
+            if wanted("end_balance"):
+                payload["end_balance_cents"] = self._end_balance(analysis)
+
+            if wanted("risk_summary"):
                 payload["risk_summary"] = self._risk_summary(analysis)
-                payload["payment_gap_cents"] = analysis.payment_gap_cents
-                payload["buffer_gap_cents"] = analysis.buffer_gap_cents
-                payload["buffer_cents"] = analysis.buffer_cents
                 payload["status"] = analysis.status
-                # 期末余额属于余额口径，只有同时允许分享最紧时点时才给出
-                if "limiting_point" in fields:
-                    payload["end_balance_cents"] = self._end_balance(analysis)
-            if "key_payments" in fields:
+
+            if wanted("payment_gap"):
+                payload["payment_gap_cents"] = analysis.payment_gap_cents
+
+            if wanted("buffer_gap"):
+                payload["buffer_gap_cents"] = analysis.buffer_gap_cents
+
+            if wanted("key_payments"):
                 payload["key_payments"] = self._key_payments(analysis)
-            if "pending_inflows" in fields:
+                # 最紧时点的事项名称属于事项级信息
+                title = self._key_payment_title(analysis)
+                if title:
+                    payload["limiting_event_title"] = title
+
+            if wanted("pending_inflows"):
                 payload["pending_inflows"] = [
                     {
                         "title": item.title,
@@ -298,27 +348,39 @@ class HouseholdService:
                     for item in analysis.pending_inflows_at_limit
                 ]
 
-        # 事项级字段必须显式勾选「关键经营付款」或「事项变更摘要」才生成
-        event_shared = EVENT_FIELD_GATE in fields or "revision_summary" in fields
-        if cash_event is not None and event_shared:
+        # 事项级字段只由「关键经营付款」带出；变更摘要不提供事项细节。
+        if cash_event is not None and wanted(EVENT_FIELD_GATE):
             payload["event_title"] = cash_event.title
             payload["event_amount_cents"] = cash_event.amount_cents
             payload["event_scheduled_at"] = cash_event.scheduled_at.isoformat()
             payload["event_version"] = cash_event.current_version
 
-        if planned_amount_cents is not None and "planned_amount" in fields:
+        if planned_amount_cents is not None and wanted("planned_amount"):
             payload["planned_household_amount_cents"] = int(planned_amount_cents)
 
-        if card_type == CARD_RISK and "risk_summary" in fields and analysis is not None:
+        if card_type == CARD_RISK and wanted("risk_summary") and analysis is not None:
             payload.setdefault("risk_summary", self._risk_summary(analysis))
 
         return payload
 
     @staticmethod
     def _scenario_zero(analysis: AnalysisResult) -> dict:
+        """权威情景。
+
+        共同约束模式的 ``scenarios[0]`` 是「按当前计划」，而顶层结论可能绑定
+        另一个情景。``payload`` 现在记录了 ``binding_scenario_index``，这里优先用它，
+        保证分享出去的数字与用户看到的结论来自同一个情景。
+        """
         payload = analysis.payload or {}
         scenarios = payload.get("scenarios") or []
-        if scenarios and isinstance(scenarios, list) and isinstance(scenarios[0], dict):
+        if not isinstance(scenarios, list):
+            return {}
+        index = payload.get("binding_scenario_index")
+        if isinstance(index, int) and 0 <= index < len(scenarios):
+            candidate = scenarios[index]
+            if isinstance(candidate, dict):
+                return candidate
+        if scenarios and isinstance(scenarios[0], dict):
             return scenarios[0]
         return {}
 
@@ -424,9 +486,9 @@ class HouseholdService:
         }.get(card_type, "家庭协同卡")
 
         if cash_event is not None and card_type == CARD_REVISION:
-            # 标题只在允许分享事项字段时才带上事项名称，否则用通用标题，
-            # 避免接收端仅凭卡片标题拿到未共享的事项信息。
-            event_shared = EVENT_FIELD_GATE in fields or "revision_summary" in fields
+            # 标题只在勾选了「关键经营付款」（事项级字段的唯一入口）时才带事项名称。
+            # 未勾选时用通用标题，避免接收端仅凭卡片标题拿到未共享的事项信息。
+            event_shared = EVENT_FIELD_GATE in fields
             title = (
                 f"事项变更通知：{cash_event.title}" if event_shared else "事项变更通知"
             )

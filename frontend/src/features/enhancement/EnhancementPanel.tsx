@@ -83,6 +83,8 @@ function SettlementPressureBlock({ data }: { data: EnhancementOverview['settleme
         size="small"
         rowKey="id"
         pagination={false}
+        // 窄屏下三列会被挤到一字一行，改为横向滚动，保证情形名称完整可读。
+        scroll={{ x: 460 }}
         dataSource={data.scenarios}
         columns={[
           {
@@ -146,6 +148,9 @@ function SettlementPressureBlock({ data }: { data: EnhancementOverview['settleme
 /** 未来 7 天日常收付参考。 */
 function ForecastBlock({ data }: { data: EnhancementOverview['forecast'] }) {
   if (!data.available) {
+    // 完全没有历史数据时，后端提示里已经带了「其它功能照常可用」，
+    // 这里只在提示没有覆盖到的情况下补一句，避免同一句话出现两次。
+    const needsFallbackNote = !(data.message ?? '').includes('照常可用');
     return (
       <Alert
         type="info"
@@ -154,9 +159,11 @@ function ForecastBlock({ data }: { data: EnhancementOverview['forecast'] }) {
         description={
           <>
             <div>{data.message}</div>
-            <div style={{ marginTop: 8 }}>
-              今日可提用金额、现金事件、情景分析、家庭协同与经营咨询都照常可用。
-            </div>
+            {needsFallbackNote ? (
+              <div style={{ marginTop: 8 }}>
+                今日可提用金额、现金事件、情景分析、家庭协同与经营咨询都照常可用。
+              </div>
+            ) : null}
           </>
         }
       />
@@ -169,7 +176,7 @@ function ForecastBlock({ data }: { data: EnhancementOverview['forecast'] }) {
         <Alert
           type="warning"
           showIcon
-          message="近期经营变化较大，这部分历史参考需要人工复核。"
+          message="近期经营波动较大，建议核对未来收支安排。"
           description={data.needs_review_reason}
         />
       ) : null}
@@ -232,9 +239,9 @@ function ForecastBlock({ data }: { data: EnhancementOverview['forecast'] }) {
                     </div>
                   );
                 })}
-                <InlineNote tone="neutral">
-                  这些是诊断指标，滚动窗口相互重叠，不是独立样本，也不代表未来准确率。
-                </InlineNote>
+                {data.validation_disclosure ? (
+                  <InlineNote tone="neutral">{data.validation_disclosure}</InlineNote>
+                ) : null}
               </div>
             ),
           },
@@ -264,6 +271,9 @@ function ReserveBlock({
         basis_hash: overview.basis_hash,
         ledger_revision: overview.ledger_revision,
         history_revision: overview.history_revision,
+        // 回传生成这条建议的运行 id：服务端要用它读回原计算参数复算，
+        // 否则非默认参数（如延后天数 3）下看到的建议永远无法确认。
+        run_id: overview.run_id,
       }),
     onSuccess: (result) => {
       message.success(result.message);
@@ -411,7 +421,7 @@ export default function EnhancementPanel() {
   return (
     <div className="gew-stack">
       <SectionCard
-        title="资金安排参考"
+        title="资金规划"
         extra={
           <Space>
             <Tooltip title="重新计算">
@@ -425,13 +435,7 @@ export default function EnhancementPanel() {
           </Space>
         }
       >
-        <InlineNote tone="neutral">
-          <InfoCircleOutlined aria-hidden="true" style={{ marginRight: 6 }} />
-          下面三段都只是安排参考。历史经验参考不计入今天可提用金额——今天能拿多少
-          始终由已确认的收付款事项决定。
-        </InlineNote>
-
-        <div style={{ marginTop: 12 }}>
+        <div>
           <InlineNote tone={copy.negative ? 'warning' : 'info'}>
             当前结论：{copy.headline}
             {data.baseline.max_withdrawable_cents !== null
@@ -459,7 +463,14 @@ export default function EnhancementPanel() {
         <SettlementPressureBlock data={data.settlement_pressure} />
       </SectionCard>
 
-      <SectionCard title="接下来 7 天日常收付参考">
+      <SectionCard
+        title="未来 7 天收付趋势"
+        extra={
+          <Tooltip title="用于观察未来收支趋势，不计入今日可提用金额。">
+            <InfoCircleOutlined style={{ color: 'var(--text-muted)' }} />
+          </Tooltip>
+        }
+      >
         <ForecastBlock data={data.forecast} />
       </SectionCard>
 

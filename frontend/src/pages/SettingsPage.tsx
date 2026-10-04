@@ -440,12 +440,6 @@ export default function SettingsPage() {
               </span>
             </div>
           </div>
-          <div style={{ marginTop: 16 }}>
-            <InlineNote tone="info">
-              智能服务的密钥只保存在后端环境变量中，任何时候都不会下发给页面。
-              页面上无法查看、也无法获取 API Key。
-            </InlineNote>
-          </div>
         </SectionCard>
       </Col>
     </Row>
@@ -494,7 +488,7 @@ export default function SettingsPage() {
   );
 
   const aiTab = (
-    <SectionCard title="智能服务状态">
+    <SectionCard title="智能助手">
       <div className="gew-kv-list">
         <div className="gew-kv-list__row">
           <span className="gew-kv-list__key">当前状态</span>
@@ -502,36 +496,26 @@ export default function SettingsPage() {
             {aiQuery.data?.available ? (
               <StatusTag tone="ok">可用</StatusTag>
             ) : aiQuery.data?.enabled ? (
-              <StatusTag tone="warning">已启用但暂不可用</StatusTag>
+              <StatusTag tone="warning">暂时不可用</StatusTag>
             ) : (
               <StatusTag tone="neutral">未启用</StatusTag>
             )}
           </span>
         </div>
-        <div className="gew-kv-list__row">
-          <span className="gew-kv-list__key">文字识别模型</span>
-          <span className="gew-kv-list__value">{aiQuery.data?.text_model ?? '未配置'}</span>
-        </div>
-        <div className="gew-kv-list__row">
-          <span className="gew-kv-list__key">截图识别模型</span>
-          <span className="gew-kv-list__value">{aiQuery.data?.vision_model ?? '未配置'}</span>
-        </div>
-        <div className="gew-kv-list__row">
-          <span className="gew-kv-list__key">密钥位置</span>
-          <span className="gew-kv-list__value">仅后端环境变量，页面不可见</span>
-        </div>
       </div>
       <div style={{ marginTop: 16 }}>
-        <InlineNote tone="info">
-          智能服务只负责理解、提取、整理与表达。所有金额、时间、余额、可提用金额与缺口都由确定性计算引擎给出，
-          智能服务不会重新计算，也不会修改计算结果。服务不可用时，你仍然可以手动完成全部操作。
-        </InlineNote>
+        <span className="gew-kv-list__key">支持的用法</span>
       </div>
-      <div style={{ marginTop: 12 }}>
+      <div style={{ marginTop: 8 }}>
         <Tag bordered={false}>文字智能录入</Tag>
         <Tag bordered={false}>截图智能录入</Tag>
         <Tag bordered={false}>帮我讲清楚</Tag>
         <Tag bordered={false}>咨询描述整理</Tag>
+      </div>
+      <div style={{ marginTop: 16 }}>
+        <InlineNote>
+          暂时不可用时，手动录入、导入与全部资金功能都可以照常使用。
+        </InlineNote>
       </div>
     </SectionCard>
   );
@@ -567,8 +551,8 @@ export default function SettingsPage() {
     },
     {
       key: 'ai',
-      label: '智能服务状态',
-      description: '文字与截图识别是否可用、密钥位置',
+      label: '智能助手',
+      description: '文字与截图识别是否可用',
       icon: <BulbOutlined />,
       content: aiTab,
     },

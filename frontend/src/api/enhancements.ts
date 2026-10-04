@@ -44,6 +44,8 @@ export interface ForecastInfo {
   summary: Record<string, number>;
   diagnostics: Record<string, unknown>;
   disclosure: string;
+  /** 校验口径说明（技术细节，只在「查看计算依据」里展示） */
+  validation_disclosure?: string;
   forecast_affects_withdrawable: boolean;
 }
 
@@ -264,6 +266,8 @@ export const enhancementApi = {
     basis_hash: string;
     ledger_revision: number;
     history_revision: number;
+    /** 生成该建议的增强运行 id；服务端据此读回原计算参数后复算校验。 */
+    run_id?: string | null;
   }) => post<ReserveConfirmResult>('/enhancements/reserve/confirm', payload),
 
   dailyHistory: () => get<DailyHistoryList>('/history/daily'),

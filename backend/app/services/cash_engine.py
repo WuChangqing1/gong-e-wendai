@@ -537,24 +537,89 @@ def run_engine(data: EngineInput) -> EngineResult:
 
 @dataclass(frozen=True, slots=True)
 class JointResult:
-    """多情景共同约束结果：取所有情景中最保守的上限。"""
+    """多情景共同约束结果：取所有情景中**真正最坏**的那个作为绑定情景。
+
+    「最坏」不能只比 ``max_withdrawable_cents``：多个不可行情景的上限都会被截断为
+    0，用最小值比较等于随机取第一个。因此按严重度排序，同级再比缺口与余额。
+
+    绑定情景一旦确定，顶层结果的所有字段都必须从它取值 —— 不允许
+    「A 情景的状态 + B 情景的缺口 + C 情景的限制时点」这种拼装。
+    """
 
     scenario_results: list[EngineResult]
     max_withdrawable_cents: int | None
     binding_label: str | None
     status: AnalysisStatus
+    #: 绑定情景在 ``scenario_results`` 中的下标；无情景时为 ``None``
+    binding_scenario_index: int | None = None
+
+    @property
+    def binding(self) -> EngineResult | None:
+        """绑定情景本身（顶层字段的唯一来源）。"""
+        index = self.binding_scenario_index
+        if index is None or index < 0 or index >= len(self.scenario_results):
+            return None
+        return self.scenario_results[index]
+
+    @property
+    def payment_gap_cents_effective(self) -> int:
+        """绑定情景的付款缺口（共同约束下顶层缺口就是它）。"""
+        binding = self.binding
+        return int(binding.payment_gap_cents) if binding is not None else 0
+
+    @property
+    def buffer_gap_cents_effective(self) -> int:
+        """绑定情景的留底缺口。"""
+        binding = self.binding
+        return int(binding.buffer_gap_cents) if binding is not None else 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "max_withdrawable_cents": self.max_withdrawable_cents,
             "binding_label": self.binding_label,
+            "binding_scenario_index": self.binding_scenario_index,
             "status": str(self.status),
             "scenarios": [item.to_dict() for item in self.scenario_results],
         }
 
 
+#: 状态严重度：数值越大越严重。INPUT_INCOMPLETE 最严重（无法给出结论）。
+STATUS_SEVERITY: dict[str, int] = {
+    str(AnalysisStatus.INPUT_INCOMPLETE): 3,
+    str(AnalysisStatus.PAYMENT_GAP): 2,
+    str(AnalysisStatus.BELOW_BUFFER): 1,
+    str(AnalysisStatus.FEASIBLE): 0,
+}
+
+
+def scenario_severity_key(result: EngineResult) -> tuple[int, int, int, int]:
+    """把一个情景映射为「越小越坏」的排序键，用于挑选绑定情景。
+
+    按产品口径的优先级逐级比较：
+
+    1. 状态严重度（``INPUT_INCOMPLETE`` > ``PAYMENT_GAP`` > ``BELOW_BUFFER`` > ``FEASIBLE``）
+    2. ``PAYMENT_GAP``：付款缺口更大者更坏，其次留底缺口更大者，再次最低余额更低者
+    3. ``BELOW_BUFFER``：留底缺口更大者更坏，其次最低余额更低者
+    4. ``FEASIBLE``：可提用更小者更坏，其次最低余额更低者
+
+    为让四种状态共用同一个键，这里统一使用「取负」把「更大更坏」转成「更小更坏」；
+    对不适用的字段填 0，因此不会影响同状态内的比较。
+    """
+    severity = STATUS_SEVERITY.get(str(result.status), 0)
+    return (
+        -severity,
+        -int(result.payment_gap_cents or 0),
+        -int(result.buffer_gap_cents or 0),
+        int(result.minimum_balance_cents if result.minimum_balance_cents is not None else 0),
+        0 if result.max_withdrawable_cents is None else int(result.max_withdrawable_cents),
+    )
+
+
 def run_joint(scenarios: Sequence[EngineInput]) -> JointResult:
-    """按“共同约束”模式计算：`x` 必须同时满足所有情景。"""
+    """按“共同约束”模式计算：`x` 必须同时满足所有情景。
+
+    绑定情景按 :func:`scenario_severity_key` 选出；结果相同时保持输入顺序（稳定）。
+    """
     results = [run_engine(item) for item in scenarios]
 
     if not results:
@@ -563,37 +628,169 @@ def run_joint(scenarios: Sequence[EngineInput]) -> JointResult:
             max_withdrawable_cents=None,
             binding_label=None,
             status=AnalysisStatus.INPUT_INCOMPLETE,
+            binding_scenario_index=None,
         )
 
-    values: list[tuple[int, str]] = []
-    statuses: list[AnalysisStatus] = []
-    for result in results:
-        statuses.append(result.status)
-        if result.max_withdrawable_cents is None:
-            continue
-        values.append((result.max_withdrawable_cents, result.label))
-
-    if not values or AnalysisStatus.INPUT_INCOMPLETE in statuses:
-        max_withdrawable: int | None = None
-        binding_label: str | None = None
-    else:
-        max_withdrawable, binding_label = min(values, key=lambda item: item[0])
-
-    if AnalysisStatus.INPUT_INCOMPLETE in statuses:
-        status = AnalysisStatus.INPUT_INCOMPLETE
-    elif any(item is AnalysisStatus.PAYMENT_GAP for item in statuses):
-        status = AnalysisStatus.PAYMENT_GAP
-    elif any(item is AnalysisStatus.BELOW_BUFFER for item in statuses):
-        status = AnalysisStatus.BELOW_BUFFER
-    else:
-        status = AnalysisStatus.FEASIBLE
+    # 稳定选择：min 取第一个最小值，键完全相同时保留输入顺序。
+    binding_index = min(range(len(results)), key=lambda index: scenario_severity_key(results[index]))
+    binding = results[binding_index]
 
     return JointResult(
         scenario_results=list(results),
-        max_withdrawable_cents=max_withdrawable,
-        binding_label=binding_label,
-        status=status,
+        max_withdrawable_cents=binding.max_withdrawable_cents,
+        binding_label=binding.label,
+        status=binding.status,
+        binding_scenario_index=binding_index,
     )
+
+
+# ---------------------------------------------------------------------------
+# 唯一解析结果
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True, slots=True)
+class ResolvedAnalysis:
+    """一次分析的**唯一权威结果**。
+
+    ``AnalysisService`` 的 API 输出、数据库落库与家庭分享全部从它派生，
+    禁止任何一处再自行判断 ``results[0]`` 或重新计算缺口。
+
+    共同约束模式下，各字段都已绑定到同一个情景（:attr:`binding_scenario_index`），
+    因此不会出现「状态来自 A、缺口来自 B、限制时点来自 C」的拼装结果。
+    """
+
+    mode: str
+    status: AnalysisStatus
+    status_label: str
+    max_withdrawable_cents: int | None
+
+    #: 绑定情景下标与标签（单情景模式下为 0 / 该情景标签）
+    binding_scenario_index: int | None
+    binding_label: str | None
+
+    opening_balance_cents: int
+    buffer_cents: int
+    snapshot_at: datetime
+    window_end_at: datetime
+
+    limiting_timestamp: datetime | None
+    limiting_balance_cents: int | None
+    limiting_event_id: str | None
+    limiting_event_title: str | None
+    limiting_reason: str
+
+    payment_gap_cents: int
+    buffer_gap_cents: int
+    minimum_balance_cents: int | None
+    end_balance_cents: int | None
+
+    window_inflow_cents: int
+    window_outflow_cents: int
+    pending_settlement_cents: int
+
+    pending_inflows_at_limit: list[PendingInflow]
+    points: list[BalancePoint]
+
+    opening_covers_buffer: bool
+    validation_errors: list[dict[str, Any]]
+    excluded_event_ids: list[str]
+    engine_version: str = ENGINE_VERSION
+
+    @property
+    def is_joint(self) -> bool:
+        return self.mode == "joint"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "mode": self.mode,
+            "status": str(self.status),
+            "status_label": self.status_label,
+            "max_withdrawable_cents": self.max_withdrawable_cents,
+            "binding_scenario_index": self.binding_scenario_index,
+            "binding_label": self.binding_label,
+            "limiting_event_title": self.limiting_event_title,
+            "payment_gap_cents": self.payment_gap_cents,
+            "buffer_gap_cents": self.buffer_gap_cents,
+        }
+
+
+#: 共同约束模式下，顶层文案由绑定情景的状态决定，因此需要与单情景不同的措辞。
+_JOINT_REASON_BY_STATUS: dict[AnalysisStatus, str] = {
+    AnalysisStatus.PAYMENT_GAP: (
+        "同时考虑这些情况后，至少一个情景即使不提用家庭资金，仍然存在付款缺口；"
+        "可提用金额为 0 只表示没有安全金额，不代表资金安排可行。"
+    ),
+    AnalysisStatus.BELOW_BUFFER: (
+        "同时考虑这些情况后，至少一个情景会低于你设置的经营留底，当前不建议提用家庭资金。"
+    ),
+    AnalysisStatus.INPUT_INCOMPLETE: "部分情景的收付款资料尚未确认，暂时无法给出共同结果。",
+}
+
+
+def resolve_analysis(
+    *,
+    mode: str,
+    engine_results: Sequence[EngineResult],
+    joint: JointResult | None = None,
+) -> ResolvedAnalysis:
+    """把一次分析的引擎结果解析为唯一权威结果。
+
+    单情景模式：直接取该情景。
+    共同约束模式：取 :func:`run_joint` 选出的绑定情景，顶层字段全部来自它。
+    """
+    if not engine_results:
+        raise ValueError("resolve_analysis 需要至少一个情景结果")
+
+    if joint is not None:
+        index = joint.binding_scenario_index
+        if index is None:
+            index = 0
+        binding = engine_results[index]
+        status = joint.status
+        binding_label = joint.binding_label
+    else:
+        index = 0
+        binding = engine_results[0]
+        status = binding.status
+        binding_label = binding.label
+
+    status_label = STATUS_LABELS[status]
+    limiting_reason = binding.limiting_reason
+    if joint is not None:
+        # 共同约束的文案必须解释「共同」的含义，不能沿用单情景措辞。
+        limiting_reason = _JOINT_REASON_BY_STATUS.get(status, binding.limiting_reason)
+
+    return ResolvedAnalysis(
+        mode=mode,
+        status=status,
+        status_label=status_label,
+        max_withdrawable_cents=(
+            joint.max_withdrawable_cents if joint is not None else binding.max_withdrawable_cents
+        ),
+        binding_scenario_index=index,
+        binding_label=binding_label,
+        opening_balance_cents=binding.opening_balance_cents,
+        buffer_cents=binding.buffer_cents,
+        snapshot_at=binding.snapshot_at,
+        window_end_at=binding.window_end_at,
+        limiting_timestamp=binding.limiting_timestamp,
+        limiting_balance_cents=binding.limiting_balance_cents,
+        limiting_event_id=binding.limiting_event_id,
+        limiting_event_title=binding.limiting_event_title,
+        limiting_reason=limiting_reason,
+        payment_gap_cents=binding.payment_gap_cents,
+        buffer_gap_cents=binding.buffer_gap_cents,
+        minimum_balance_cents=binding.minimum_balance_cents,
+        end_balance_cents=binding.end_balance_cents,
+        window_inflow_cents=binding.window_inflow_cents,
+        window_outflow_cents=binding.window_outflow_cents,
+        pending_settlement_cents=binding.pending_settlement_cents,
+        pending_inflows_at_limit=list(binding.pending_inflows_at_limit),
+        points=list(binding.points),
+        opening_covers_buffer=binding.opening_covers_buffer,
+        validation_errors=list(binding.validation_errors),
+        excluded_event_ids=list(binding.excluded_event_ids),
+    )
+
 
 
 def events_version_hash(events: Sequence[CashEventInput]) -> str:
@@ -622,13 +819,17 @@ __all__ = [
     "JointResult",
     "MATERIAL_FIELDS",
     "PendingInflow",
+    "ResolvedAnalysis",
     "STATE_CANCELLED",
     "STATE_INCLUDED_IN_OPENING",
     "STATE_SCHEDULED",
     "STATUS_LABELS",
+    "STATUS_SEVERITY",
     "events_version_hash",
     "is_engine_version_current",
+    "resolve_analysis",
     "run_engine",
     "run_joint",
+    "scenario_severity_key",
     "validate_events",
 ]

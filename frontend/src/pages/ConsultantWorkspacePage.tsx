@@ -263,13 +263,6 @@ export default function ConsultantWorkspacePage({ onlyRecords = false }: { onlyR
         />
       </SectionCard>
 
-      <SectionCard title="权限说明">
-        <InlineNote tone="info">
-          你只能看到商户授权共享的字段。家庭评论、家庭成员资料、未授权经营事件、完整经营余额、
-          当前最大可提用金额与家庭留底设置均不可见，也无法修改商户的收付款事项。
-        </InlineNote>
-      </SectionCard>
-
       <Drawer
         title={detail ? `受理事项 · ${detail.case_no}` : '受理事项'}
         width={680}

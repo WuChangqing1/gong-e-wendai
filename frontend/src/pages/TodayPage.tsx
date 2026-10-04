@@ -481,10 +481,6 @@ export default function TodayPage() {
       >
         {result ? (
           <div className="gew-stack">
-            <InlineNote tone="info">
-              以下数值全部由确定性计算引擎得出。智能服务只负责解释，不参与任何金额计算。
-            </InlineNote>
-
             <SectionCard title="基础数据" flat bodyClassName="gew-card__body--tight">
               <DescriptionGrid
                 items={[
@@ -529,10 +525,6 @@ export default function TodayPage() {
                   <span className="gew-kv-list__key">留底缺口</span>
                   <span className="gew-kv-list__value num">{formatCny(result.buffer_gap_cents)}</span>
                 </div>
-                <div className="gew-kv-list__row">
-                  <span className="gew-kv-list__key">计算引擎版本</span>
-                  <span className="gew-kv-list__value num">{result.engine_version}</span>
-                </div>
               </div>
             </SectionCard>
 
@@ -555,10 +547,7 @@ export default function TodayPage() {
               <SectionCard title="待补充的资料" flat bodyClassName="gew-card__body--tight">
                 <ul style={{ margin: 0, paddingLeft: 18 }}>
                   {result.validation_errors.map((item, index) => (
-                    <li key={index}>
-                      {item.reason}
-                      {item.field ? `（字段：${item.field}）` : ''}
-                    </li>
+                    <li key={index}>{item.reason}</li>
                   ))}
                 </ul>
               </SectionCard>

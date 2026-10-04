@@ -91,8 +91,7 @@ export default function AiExplainPanel({ result }: { result: AnalysisResult }) {
         <Alert
           type="warning"
           showIcon
-          message="智能服务暂时不可用，请手动完成当前操作。"
-          description="你仍然可以查看上方完整的计算依据，所有金额与结论都来自确定性计算。"
+          message="智能解读暂时不可用，请稍后再试。"
           action={
             <Button size="small" onClick={explain}>
               重试
@@ -102,12 +101,7 @@ export default function AiExplainPanel({ result }: { result: AnalysisResult }) {
       ) : null}
 
       {text ? (
-        <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.8 }}>
-          {text}
-          <p style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 0, marginTop: 12 }}>
-            以上说明由智能服务根据计算结果整理，金额与结论以计算结果为准。
-          </p>
-        </div>
+        <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.8 }}>{text}</div>
       ) : null}
     </SectionCard>
   );

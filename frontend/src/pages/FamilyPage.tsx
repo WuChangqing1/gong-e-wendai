@@ -15,7 +15,6 @@ import {
   Row,
   Space,
   Table,
-  Tag,
   Tooltip,
   Typography,
 } from 'antd';
@@ -278,7 +277,7 @@ export default function FamilyPage() {
                       ]}
                     />
                     <InlineNote>
-                      分享时你可以逐项选择要共享的内容。完整经营余额与全部交易明细默认不分享。
+                      分享时逐项选择要共享的内容即可。
                     </InlineNote>
                   </div>
                 ) : (
@@ -399,25 +398,11 @@ export default function FamilyPage() {
             />
           </SectionCard>
 
-          <SectionCard title="隐私说明">
-            <InlineNote tone="info">
-              加入家庭不等于可以查看完整经营账户。家庭成员默认无法访问收付款事项、经营账户余额、
-              资金分析全量数据与经营咨询记录，只能查看你明确分享的协同卡片。
-              所有权限都在后端校验，不依赖前端隐藏按钮。
-            </InlineNote>
-            <div style={{ marginTop: 12 }}>
-              <Tag bordered={false}>默认不分享：完整经营余额</Tag>
-              <Tag bordered={false}>默认不分享：全部交易明细</Tag>
-              <Tag bordered={false}>默认不分享：完整导入文件</Tag>
-              <Tag bordered={false}>默认不分享：经营咨询</Tag>
-            </div>
-          </SectionCard>
         </>
       )}
 
       <Modal
-        title="创建家庭"
-        open={createOpen}
+        title="创建家庭"        open={createOpen}
         onCancel={() => setCreateOpen(false)}
         onOk={() => form.submit()}
         okText="创建"
