@@ -78,8 +78,13 @@ class CashEventCreate(BaseModel):
 
 
 class CashEventUpdate(BaseModel):
-    """修改现金事件。金额、时间、方向、状态的修改都会产生新版本。"""
+    """修改现金事件。金额、时间、方向、状态的修改都会产生新版本。
 
+    ``cash_key`` 也允许更正：单据编号录错时必须能改，且同样留痕
+    （同一经营主体内不允许重复，编号本身不影响计算结果）。
+    """
+
+    cash_key: str | None = Field(default=None, min_length=1, max_length=128)
     title: str | None = Field(default=None, min_length=1, max_length=128)
     direction: str | None = None
     amount_cents: int | None = Field(default=None, ge=0, le=10**13)
@@ -90,6 +95,16 @@ class CashEventUpdate(BaseModel):
     note: str | None = Field(default=None, max_length=2000)
     sequence_index_optional: int | None = Field(default=None, ge=0, le=10**6)
     change_reason: str | None = Field(default=None, max_length=255)
+
+    @field_validator("cash_key")
+    @classmethod
+    def _strip_cash_key(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("事项编号不能为空")
+        return cleaned
 
     @field_validator("direction")
     @classmethod

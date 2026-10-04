@@ -188,6 +188,42 @@ class TestUpdateAndRevision:
         assert revisions[0]["after"]["amount_cents"] == 330_00
         assert revisions[-1]["before"] is None
 
+    def test_cash_key_can_be_corrected_and_is_traced(self, merchant_client: TestClient):
+        """单据编号录错时必须能更正，并且同样留下版本记录。"""
+        created = merchant_client.post("/api/v1/cash-events", json=BASE_PAYLOAD).json()
+        response = merchant_client.patch(
+            f"/api/v1/cash-events/{created['id']}",
+            json={"cash_key": "API-RENT-0002", "change_reason": "单据编号录错"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["cash_key"] == "API-RENT-0002"
+        assert response.json()["current_version"] == 2
+
+        revisions = merchant_client.get(
+            f"/api/v1/cash-events/{created['id']}/revisions"
+        ).json()
+        assert revisions[0]["changed_fields"] == ["cash_key"]
+        # 编号只影响识别，不影响金额口径，因此不是「实质变更」
+        assert revisions[0]["material"] is False
+        assert revisions[0]["changes"][0]["label"] == "事项编号"
+
+    def test_duplicate_cash_key_is_rejected(self, merchant_client: TestClient):
+        api_fx.setup_merchant(merchant_client)
+        items = merchant_client.get("/api/v1/cash-events").json()["items"]
+        first, second = items[0], items[1]
+        response = merchant_client.patch(
+            f"/api/v1/cash-events/{second['id']}", json={"cash_key": first["cash_key"]}
+        )
+        assert response.status_code == 422
+        assert response.json()["code"] == "DUPLICATE_CASH_KEY"
+
+    def test_blank_cash_key_is_rejected(self, merchant_client: TestClient):
+        created = merchant_client.post("/api/v1/cash-events", json=BASE_PAYLOAD).json()
+        response = merchant_client.patch(
+            f"/api/v1/cash-events/{created['id']}", json={"cash_key": "   "}
+        )
+        assert response.status_code == 422
+
 
 class TestCancel:
     def test_cancel_sets_state_and_keeps_history(self, merchant_client: TestClient):

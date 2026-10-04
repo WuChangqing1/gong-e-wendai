@@ -293,6 +293,17 @@ class CashEventService:
         data = payload.model_dump(exclude_unset=True)
         reason = data.pop("change_reason", None)
 
+        new_key = data.get("cash_key")
+        if new_key is not None and new_key != event.cash_key:
+            # 编号必须在同一经营主体内唯一：这里先做显式检查，
+            # 避免依赖数据库唯一约束抛出难以理解的 500。
+            taken = self.events.get_by_cash_key(event.merchant_id, new_key)
+            if taken is not None and taken.id != event.id:
+                raise ValidationFailed(
+                    "该事项编号已被同一经营主体的其它事项占用",
+                    code="DUPLICATE_CASH_KEY",
+                )
+
         before = snapshot_event(event)
         for key, value in data.items():
             if key == "scheduled_at" and value is not None:
