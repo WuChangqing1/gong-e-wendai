@@ -102,6 +102,8 @@ python scripts/populate_product_data.py --apply --reference-at 2026-10-04T09:00:
 **幂等策略**
 
 * 资金时点：仅当最新时点的期初不等于目标值时才登记新时点，历史时点保留
+* 旧初始化事项：先取消，再把带 `DEMO` 的编号改成中性编号（沿用业务前缀 + 自身日期）
+* 家庭邀请码：旧演示邀请码（如 `DEVDEMO1`）换成后端随机生成的邀请码
 * 事项：按 `cash_key` 判重，已存在则跳过
 * 版本历史：仅当 `current_version < 2` 且该事项在修订计划内时才生成
 * 历史数据：按自然日判重，只补缺失的日期
@@ -116,6 +118,8 @@ python scripts/populate_product_data.py --apply --reference-at 2026-10-04T09:00:
 * 三个正式账号任一缺失即停止并报告，**不会**偷偷新建固定密码用户
 * 只做增量：不删除用户、事项、历史、家庭、咨询或来源数据
 * 旧演示初始化事项通过 `EventService.cancel_event` 取消（保留版本与来源），**不物理删除**
+* 编号规范化只作用于 :data:`LEGACY_CASH_KEYS` 白名单内的三笔记录，
+  走 `EventService.update_event` 写入版本历史，绝不改经营者自己录入的事项
 * 数据全部经 Service Layer 写入，版本历史、审计日志、来源记录由业务规则自然产生
 
 ---

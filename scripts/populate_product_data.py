@@ -59,6 +59,9 @@ LEGACY_CASH_KEYS = (
     "DEMO-PAY-0001",
 )
 
+#: 经营者可见的编号里不允许出现的字样
+DEMO_KEY_TOKENS = ("DEMO", "TEST", "DEV", "SIM")
+
 #: 核心算例常量（与 backend/tests/fixtures_cash.py 完全一致）
 OPENING_BALANCE_CENTS = 3600_00
 BUFFER_CENTS = 600_00
@@ -134,6 +137,30 @@ def local_day(reference: datetime, offset_days: int) -> date:
 def cash_key_for(kind: str, day: date, index: int) -> str:
     prefix = KEY_PREFIXES.get(kind, "EVT")
     return f"{prefix}-{day.strftime('%Y%m%d')}-{index:03d}"
+
+
+def is_demo_key(cash_key: str | None) -> bool:
+    """编号里是否含 DEMO / TEST / DEV / SIM 之类字样（经营者可见的编号不允许）。"""
+    upper = (cash_key or "").upper()
+    return any(token in upper for token in DEMO_KEY_TOKENS)
+
+
+def legacy_key_for(row, taken: set[str]) -> str:  # noqa: ANN001
+    """给退场事项生成中性编号：沿用业务前缀 + 该事项自己的预计日期。
+
+    与未来事项共用同一套编号规则（`KEY_PREFIXES`），因此列表里看起来是
+    一笔普通的历史记录，而不是初始化数据。
+    """
+    from app.utils.timeutil import APP_TIMEZONE  # noqa: PLC0415
+
+    prefix = KEY_PREFIXES.get(row.event_type or "", "EVT")
+    scheduled = row.scheduled_at
+    day = scheduled.astimezone(APP_TIMEZONE).strftime("%Y%m%d") if scheduled else "00000000"
+    for index in range(1, 1000):
+        candidate = f"{prefix}-{day}-{index:03d}"
+        if candidate not in taken:
+            return candidate
+    raise RuntimeError(f"无法为退场事项分配中性编号：{row.cash_key}")
 
 
 # ---------------------------------------------------------------------------
@@ -381,7 +408,7 @@ def build_plan(profile, *, reference_at: datetime, dry_run: bool) -> Plan:
     from app.models.cash import CashEvent
     from app.models.consultation import ConsultationCase
     from app.models.enhancement import DailyCashHistory, SettlementRecord
-    from app.models.household import HouseholdCard
+    from app.models.household import Household, HouseholdCard
     from app.models.merchant import BusinessAccountSnapshot
 
     plan = Plan()
@@ -412,6 +439,11 @@ def build_plan(profile, *, reference_at: datetime, dry_run: bool) -> Plan:
         row = existing_keys.get(key)
         if row is not None and row.state == "scheduled":
             plan.add("cancel_legacy", f"取消旧初始化事项 {key}（{row.title}）")
+
+    # 已退场的旧演示编号仍是经营者可见的「事项编号」，
+    # 因此要改成中性编号（保留记录与版本，不删除）。
+    for _row, old_key, new_key in legacy_renames(db, profile, reference_at):
+        plan.add("rename_legacy_key", f"旧初始化事项改编号 {old_key} → {new_key}")
 
     # --- 未来事项 ---
     for spec in (*CORE_EVENTS, *EXTRA_EVENTS):
@@ -466,6 +498,15 @@ def build_plan(profile, *, reference_at: datetime, dry_run: bool) -> Plan:
             count=expected_settlements - existing_settlements,
         )
 
+    # --- 家庭与邀请码 ---
+    household = db.scalar(
+        select(Household).where(Household.merchant_id == profile.id).limit(1)
+    )
+    if household is None:
+        plan.add("household", "创建家庭「王家小院」（邀请码由后端随机生成）")
+    elif is_demo_key(household.invite_code):
+        plan.add("rotate_invite_code", "旧演示邀请码更新为随机邀请码")
+
     # --- 家庭协同卡与评论 ---
     existing_cards = len(
         db.scalars(
@@ -500,6 +541,34 @@ def _index_of(spec: EventSpec) -> int:
 
 def event_key(spec: EventSpec, reference_at: datetime) -> str:
     return cash_key_for(spec.kind, local_day(reference_at, spec.offset_days), _index_of(spec))
+
+
+def legacy_renames(db, profile, reference_at: datetime) -> list[tuple[object, str, str]]:  # noqa: ANN001
+    """需要改编号的退场事项：``[(row, 旧编号, 新编号), ...]``。
+
+    dry-run 与 apply 共用本函数，保证「计划里写什么」与「实际做什么」一致。
+    只处理 :data:`LEGACY_CASH_KEYS` 白名单内的记录，绝不改经营者自己录的事项。
+    """
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from app.models.cash import CashEvent  # noqa: PLC0415
+
+    rows = list(
+        db.scalars(select(CashEvent).where(CashEvent.merchant_id == profile.id)).all()
+    )
+    taken = {row.cash_key for row in rows}
+    # 未来事项的编号也要预留，避免退场事项占用后导致事项无法落库
+    for spec in (*CORE_EVENTS, *EXTRA_EVENTS):
+        taken.add(event_key(spec, reference_at))
+
+    pairs: list[tuple[object, str, str]] = []
+    ordered = sorted(rows, key=lambda row: (row.scheduled_at or datetime.min, row.cash_key))
+    for row in ordered:
+        if row.cash_key in LEGACY_CASH_KEYS and is_demo_key(row.cash_key):
+            new_key = legacy_key_for(row, taken)
+            taken.add(new_key)
+            pairs.append((row, row.cash_key, new_key))
+    return pairs
 
 
 # ---------------------------------------------------------------------------
@@ -571,6 +640,21 @@ def apply_merchant_data(
             )
             if verbose:
                 print(f"  ✓ 取消旧初始化事项 {key}")
+
+    # 2b) 旧演示编号改成中性编号：经营者能看到「事项编号」，
+    #     编号里不能留 DEMO / TEST / DEV / SIM 字样；改编号同样写入版本历史。
+    for row, old_key, new_key in legacy_renames(db, profile, reference_at):
+        service.update_event(
+            row,
+            CashEventUpdate(
+                cash_key=new_key,
+                change_reason=f"{SOURCE_PREFIX}: 旧初始化数据退场，编号规范化",
+            ),
+            actor=merchant,
+            commit=True,
+        )
+        if verbose:
+            print(f"  ✓ 旧初始化事项改编号 {old_key} → {new_key}")
 
     # 3) 未来事项 + 来源记录
     existing = {
@@ -905,29 +989,20 @@ def apply_household_data(
 
     household = db.scalar(select(Household).where(Household.merchant_id == profile.id))
     if household is None:
-        household = Household(
-            name="王家小院",
-            owner_id=merchant.id,
-            merchant_id=profile.id,
-            invite_code="WJXY2026",
-            invite_code_active=True,
-        )
-        db.add(household)
-        db.flush()
-        db.add(
-            HouseholdMembership(
-                household_id=household.id,
-                user_id=merchant.id,
-                role="owner",
-                status="active",
-                joined_at=utcnow(),
-                decided_by=merchant.id,
-                decided_at=utcnow(),
-            )
-        )
-        db.commit()
+        # 走产品自身的开通路径：邀请码由后端随机生成，不写死固定串
+        # （旧初始化数据里的 DEVDEMO1 就是写死邀请码留下的）。
+        service.create_household(profile, merchant, "王家小院")
+        household = db.scalar(select(Household).where(Household.merchant_id == profile.id))
+        if household is None:  # pragma: no cover - 创建失败会直接抛错
+            raise RuntimeError("家庭创建失败")
         if verbose:
             print("  ✓ 创建家庭「王家小院」")
+    elif is_demo_key(household.invite_code):
+        # 旧演示邀请码会直接显示在「家庭协同」页上，必须换成随机码；
+        # 邀请码本身是凭证，只报告长度，不打印内容。
+        rotated = service.rotate_invite_code(household)
+        if verbose:
+            print(f"  ✓ 旧演示邀请码已更新为随机邀请码（{len(rotated)} 位）")
 
     membership = db.scalar(
         select(HouseholdMembership).where(
