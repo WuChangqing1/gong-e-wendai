@@ -144,3 +144,84 @@ max_withdrawable_cents=0   opening_balance_cents=60000   buffer_cents=60000
 * 服务器 `node_modules` 已存在，因此本次未执行 `npm ci`（`deploy_v2.sh` 也不包含该步）
 * `xitongguanli` 变为 `disabled` 且无角色：这是 V3「不存在管理员身份」的预期结果，
   如需恢复为某种业务身份，应由上层系统重新授予
+
+---
+
+## 9. 最终产品化收口（2026-10-04）
+
+### 9.1 两次增量部署
+
+| 项目 | 值 |
+| --- | --- |
+| 分支 | `feat/final-product-polish` → merge 进 `main` |
+| 第一次部署 | `5c26a7b` → `bbc20a4`（合并提交） |
+| 第二次部署 | `bbc20a4` → `d385c42`（复核修复） |
+| 发布 Tag | `final-product-polish-20261004`、`final-product-hardening-20261004` |
+| 更新方式 | `git bundle`（服务器无 GitHub 凭据） |
+| 备份 | `~/apps/gong-e-wendai-data/backups/`、`~/apps/gong-e-wendai-pre-v2-20261004104257.tar.gz`、`...-20261004105318.tar.gz` |
+| 迁移 | 无新增迁移，仍为 `7b1c4d9e2f30 (head)` |
+| 服务 | `active`，`NRestarts=0`，`/api/v1/health` = `ok / database ok / ai_enabled true` |
+| 既有项目 | 18082 / 18088 均 200 |
+
+### 9.2 正式业务数据（`scripts/populate_product_data.py --apply`）
+
+| 项目 | 结果 |
+| --- | --- |
+| 资金时点 | 新增 3600 元时点，历史 600 元时点保留（共 2 条） |
+| 旧初始化事项 | 3 笔取消（版本 3），并规范化为 `SET-20261003-001` / `PAY-20261004-001` / `SET-20261007-001`（版本 4，`changed_fields=["cash_key"]`，`material=false`） |
+| 未来事项 | 10 笔 scheduled（1400/2000/1800/600/900/500/1200/400/300/600 元） |
+| 版本历史 | 4 笔事项各 3 个版本（共 30 条修订记录） |
+| 历史经营数据 | 84 天连续完整 |
+| 结算记录 | 20 条（completed 17 / open 3） |
+| 家庭 | 王家小院（owner 王掌柜 + member 王太太，均 active） |
+| 家庭协同卡 | 8 张（decision 4 / risk 2 / revision 2），收件人均为王太太，已读 5 / 未读 3，表态 同意 1 / 商量 1，评论 4 条 |
+| 家庭邀请码 | 旧演示邀请码已换为随机 8 位码 |
+| 经营咨询 | 8 条（submitted 2 / under_review 2 / verified 2 / need_more_information 1 / closed 1），处理时间线 83 条 |
+| 第二次 `--dry-run` | 「无待执行动作（数据已就绪，幂等）」 |
+
+### 9.3 计算口径复核（生产真实接口）
+
+`wangzhanggui`（期初 3600 / 留底 600 / 10 笔未来事项）：
+
+| 调用 | 结果 |
+| --- | --- |
+| `/analysis/today` | `FEASIBLE` 资金安排可行，可提用 **120000**，最紧时点余额 **180000** |
+| `/analysis/run {mode: delayed, delay_days: 2}` | `PAYMENT_GAP`，付款缺口 **20000**，留底缺口 **80000**，最紧时点 **-20000** |
+| `/analysis/run {mode: joint, delay_days: 2}` | `PAYMENT_GAP`，`binding_scenario_index=1`（到账延迟），付款缺口 20000 / 留底缺口 80000 |
+| `/enhancements/overview` | 预测 `available=true`（84 天），留底建议 `SUGGESTION`：当前 600 → 建议 1200 |
+
+### 9.4 三账号逐页验收（公网 `https://ccqspace.site/wendai/`，真实浏览器）
+
+11 个页面全部通过：无开发口径文案、无内部字段名、无乱码、无横向溢出。
+
+| 账号 | 页面 |
+| --- | --- |
+| `wangzhanggui`（经营者） | 今日决策 / 现金事件 / 情景分析 / 家庭协同 / 经营咨询 / 我的 |
+| `wangtaitai`（家庭成员） | 家庭协同（8 张卡片，字段标签齐全）/ 我的 |
+| `zixunxiaoli`（咨询人员） | 咨询工作台 / 事项记录 / 我的 |
+
+其它复核：
+
+| 项目 | 结果 |
+| --- | --- |
+| 旧后台地址 `/wendai/admin` | 渲染「页面不存在」 |
+| 家庭协同卡渲染 | 已共享字段全部显示为中文标签（含最紧时点余额、付款缺口、留底缺口），未登记键显示「其他信息」 |
+| 现金事件编号 | 不再出现 `DEMO` 字样 |
+| 家庭邀请码 | 不再出现 `DEVDEMO1` |
+| 最近日志 ERROR | 0 行 |
+
+### 9.5 收口阶段新发现并修复的问题
+
+| 编号 | 现象 | 处理 |
+| --- | --- | --- |
+| C4 | 「未来 7 天收付趋势」在无历史数据时把同一句话显示两遍 | 前端只在后端提示未覆盖时补充 |
+| C5 | 窄屏情形对比表首列被挤成一字一行 | 容器内横向滚动 |
+| C6 | 「待补充的资料」显示 `amount_cents` 等内部字段名 | 只显示业务化原因 |
+| C7 | 脚本在 GBK 控制台打印「✓」时 `UnicodeEncodeError`，账户已开通却报错退出 | 标准输出切 UTF-8 |
+| C8 | 接收端协同卡漏渲染已共享字段，且显示 `revision_summary` | 统一渲染模型 + 标签补全 |
+| C9 | 事项编号无法更正 | 允许更正（唯一性校验 + 版本留痕） |
+| C10 | 旧演示编号与邀请码仍对用户可见 | 规范化编号 + 随机邀请码 |
+
+以上 C4–C7 由视觉巡检发现，C8–C10 由公网三账号逐页验收发现；
+完整清单与提交对应关系见 `docs/final-product-baseline.md` 第 6 节。
+
