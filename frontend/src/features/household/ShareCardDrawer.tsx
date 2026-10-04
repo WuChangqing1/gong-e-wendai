@@ -25,10 +25,10 @@ import { errorMessage } from '@/api/client';
 import { queryKeys } from '@/api/queryClient';
 import { useDrawerWidth } from '@/hooks/useResponsive';
 import { InlineNote } from '@/components/ui';
+import { buildCardPayloadItems } from '@/features/household/cardPayload';
 import type { AnalysisResult, CardType } from '@/types';
 import { formatCny } from '@/utils/money';
 import { formatDateTime } from '@/utils/datetime';
-import { SHARE_FIELD_LABELS } from '@/utils/labels';
 
 const DEFAULT_FIELDS = ['max_withdrawable', 'limiting_point', 'risk_summary'];
 
@@ -103,19 +103,10 @@ export default function ShareCardDrawer({
 
   const members = householdQuery.data?.members.filter((item) => item.status === 'active') ?? [];
 
-  const previewItems = useMemo(() => {
-    const payload = previewQuery.data?.payload ?? {};
-    return Object.entries(payload).map(([key, value]) => ({
-      key,
-      label: SHARE_FIELD_LABELS[key] ?? key,
-      value:
-        typeof value === 'number' && key.includes('amount')
-          ? formatCny(value)
-          : typeof value === 'string'
-            ? value
-            : JSON.stringify(value),
-    }));
-  }, [previewQuery.data]);
+  const previewItems = useMemo(
+    () => buildCardPayloadItems(previewQuery.data?.payload ?? {}),
+    [previewQuery.data],
+  );
 
   return (
     <Drawer
@@ -174,10 +165,16 @@ export default function ShareCardDrawer({
                 onChange={(values) => setFields(values as string[])}
                 style={{ display: 'grid', gap: 8 }}
               >
+                {/* 与后端 household_service.SHAREABLE_FIELDS 保持一致：
+                    这里少一项，用户就永远勾不到那一项。 */}
                 <Checkbox value="max_withdrawable">今日可提用金额</Checkbox>
                 <Checkbox value="limiting_point">最紧张时间</Checkbox>
+                <Checkbox value="limiting_balance">最紧时点余额</Checkbox>
+                <Checkbox value="end_balance">期末余额</Checkbox>
                 <Checkbox value="key_payments">关键经营付款</Checkbox>
                 <Checkbox value="risk_summary">风险摘要</Checkbox>
+                <Checkbox value="payment_gap">付款缺口</Checkbox>
+                <Checkbox value="buffer_gap">留底缺口</Checkbox>
                 <Checkbox value="pending_inflows">尚未到账的收入</Checkbox>
               </Checkbox.Group>
             </div>

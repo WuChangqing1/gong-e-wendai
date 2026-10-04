@@ -25,9 +25,9 @@ import { householdApi, householdCardApi } from '@/api/household';
 import { errorMessage } from '@/api/client';
 import { queryKeys } from '@/api/queryClient';
 import { DescriptionGrid, InlineNote, PageHeader, SectionCard, StatusTag } from '@/components/ui';
+import { buildCardPayloadItems } from '@/features/household/cardPayload';
 import type { CardType, HouseholdCard, ReactionType } from '@/types';
-import { formatCny } from '@/utils/money';
-import { formatDateTime, formatRelative } from '@/utils/datetime';
+import { formatRelative } from '@/utils/datetime';
 import { CARD_TYPE_LABELS, REACTION_LABELS, SHARE_FIELD_LABELS } from '@/utils/labels';
 
 const TABS: { label: string; value: CardType | 'all' }[] = [
@@ -71,66 +71,24 @@ function CardBody({ card }: { card: HouseholdCard }) {
     onError: (error) => message.error(errorMessage(error)),
   });
 
-  const items: { label: string; value: React.ReactNode }[] = [];
-  const payload = card.payload ?? {};
-
-  if (typeof payload.max_withdrawable_cents === 'number' || card.system_max_withdrawable_cents !== null) {
-    const value =
-      (payload.max_withdrawable_cents as number | undefined) ?? card.system_max_withdrawable_cents;
-    items.push({ label: '今日可提用金额', value: <span className="num" style={{ fontWeight: 700 }}>{formatCny(value ?? null)}</span> });
+  // 接收端与分享预览共用同一个渲染模型（详见 features/household/cardPayload），
+  // 保证「经营者勾了什么」与「家人看到什么」逐项一致。
+  const payload: Record<string, unknown> = { ...(card.payload ?? {}) };
+  if (
+    card.shared_fields.includes('max_withdrawable') &&
+    payload.max_withdrawable_cents === undefined &&
+    card.system_max_withdrawable_cents !== null
+  ) {
+    payload.max_withdrawable_cents = card.system_max_withdrawable_cents;
   }
-  if (typeof payload.planned_household_amount_cents === 'number') {
-    items.push({
-      label: '计划家庭提用金额',
-      value: <span className="num">{formatCny(payload.planned_household_amount_cents)}</span>,
-    });
+  if (
+    card.shared_fields.includes('planned_amount') &&
+    payload.planned_household_amount_cents === undefined &&
+    card.planned_household_amount_cents !== null
+  ) {
+    payload.planned_household_amount_cents = card.planned_household_amount_cents;
   }
-  if (typeof payload.limiting_timestamp === 'string') {
-    items.push({ label: '最紧张时间', value: formatDateTime(payload.limiting_timestamp) });
-  }
-  if (typeof payload.limiting_event_title === 'string') {
-    items.push({ label: '关键付款', value: payload.limiting_event_title });
-  }
-  if (typeof payload.payment_gap_cents === 'number') {
-    items.push({
-      label: '付款缺口',
-      value: (
-        <span className="num" style={{ color: payload.payment_gap_cents > 0 ? 'var(--danger)' : undefined }}>
-          {formatCny(payload.payment_gap_cents)}
-        </span>
-      ),
-    });
-  }
-  if (typeof payload.buffer_gap_cents === 'number') {
-    items.push({
-      label: '留底缺口',
-      value: (
-        <span className="num" style={{ color: payload.buffer_gap_cents > 0 ? 'var(--danger)' : undefined }}>
-          {formatCny(payload.buffer_gap_cents)}
-        </span>
-      ),
-    });
-  }
-  if (typeof payload.risk_summary === 'string') {
-    items.push({ label: '风险摘要', value: payload.risk_summary });
-  }
-  if (typeof payload.end_balance_cents === 'number') {
-    items.push({ label: '期末余额', value: <span className="num">{formatCny(payload.end_balance_cents)}</span> });
-  }
-  if (Array.isArray(payload.pending_inflows) && payload.pending_inflows.length > 0) {
-    items.push({
-      label: '尚未到账的收入',
-      value: (
-        <ul style={{ margin: 0, paddingLeft: 18 }}>
-          {(payload.pending_inflows as { title: string; amount_text: string }[]).map((item, index) => (
-            <li key={index}>
-              {item.title} {item.amount_text}
-            </li>
-          ))}
-        </ul>
-      ),
-    });
-  }
+  const items = buildCardPayloadItems(payload);
 
   return (
     <div className="gew-stack">
@@ -219,7 +177,7 @@ function CardBody({ card }: { card: HouseholdCard }) {
 
       <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
         包含字段：
-        {card.shared_fields.map((field) => SHARE_FIELD_LABELS[field] ?? field).join('、') || '—'}
+        {card.shared_fields.map((field) => SHARE_FIELD_LABELS[field] ?? '其他信息').join('、') || '—'}
       </div>
     </div>
   );

@@ -165,14 +165,28 @@ export const CARD_TYPE_LABELS: Record<string, string> = {
   revision: '更正通知卡',
 };
 
+/**
+ * 分享字段标签。
+ *
+ * 必须与后端 `household_service.FIELD_LABELS` 逐项一致；任何一处少写，
+ * 界面就会退回显示内部字段名（例如 `revision_summary`）。
+ */
 export const SHARE_FIELD_LABELS: Record<string, string> = {
   max_withdrawable: '今日可提用金额',
   planned_amount: '计划家庭提用金额',
   limiting_point: '最紧张时间',
+  limiting_balance: '最紧时点余额',
+  end_balance: '期末余额',
   key_payments: '关键经营付款',
   risk_summary: '风险摘要',
+  payment_gap: '付款缺口',
+  buffer_gap: '留底缺口',
   pending_inflows: '尚未到账的收入',
+  revision_summary: '事项变更摘要',
 };
+
+/** 未登记字段的统一标签：宁可少说，也不暴露内部字段名。 */
+export const UNKNOWN_SHARE_FIELD_LABEL = '其他信息';
 
 /** 默认不勾选（敏感字段） */
 export const SHARE_FIELD_SENSITIVE = new Set([
