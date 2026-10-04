@@ -85,7 +85,7 @@ test.describe('图表化分析', () => {
     await loginViaUi(page, fixture.user.username);
 
     for (const [route, forbidden] of [
-      ['/today', ['确定性计算引擎', '计算引擎版本']],
+      ['/today', ['确定性计算引擎', '计算引擎版本', '字段：']],
       ['/analysis', ['说明与口径', '换成图形表达']],
       ['/settings', ['API Key', '密钥', '环境变量', '文字识别模型']],
     ] as const) {
@@ -96,6 +96,20 @@ test.describe('图表化分析', () => {
         expect(text, `${route} 不应出现「${word}」`).not.toContain(word);
       }
     }
+  });
+
+  test('历史不足时的提示不重复', async ({ page, request }) => {
+    // 无历史数据时后端提示里已经带了「其它功能照常可用」，
+    // 前端不能再补一句同样的说明，否则同一句话会连着出现两次。
+    const fixture = await createMerchantFixture(request, 'nodup');
+    await loginViaUi(page, fixture.user.username);
+    await gotoAuthed(page, '/today');
+    await expect(page.getByText('未来 7 天收付趋势').first()).toBeVisible({ timeout: 25_000 });
+    await page.waitForTimeout(800);
+
+    const text = await page.locator('body').innerText();
+    const occurrences = text.split('照常可用').length - 1;
+    expect(occurrences, '「照常可用」不应重复出现').toBeLessThanOrEqual(1);
   });
 
   test('窗口聚合接口与引擎口径一致', async ({ page, request }) => {

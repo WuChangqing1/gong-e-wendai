@@ -547,10 +547,7 @@ export default function TodayPage() {
               <SectionCard title="待补充的资料" flat bodyClassName="gew-card__body--tight">
                 <ul style={{ margin: 0, paddingLeft: 18 }}>
                   {result.validation_errors.map((item, index) => (
-                    <li key={index}>
-                      {item.reason}
-                      {item.field ? `（字段：${item.field}）` : ''}
-                    </li>
+                    <li key={index}>{item.reason}</li>
                   ))}
                 </ul>
               </SectionCard>

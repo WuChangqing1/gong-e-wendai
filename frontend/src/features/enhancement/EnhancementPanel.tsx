@@ -83,6 +83,8 @@ function SettlementPressureBlock({ data }: { data: EnhancementOverview['settleme
         size="small"
         rowKey="id"
         pagination={false}
+        // 窄屏下三列会被挤到一字一行，改为横向滚动，保证情形名称完整可读。
+        scroll={{ x: 460 }}
         dataSource={data.scenarios}
         columns={[
           {
@@ -146,6 +148,9 @@ function SettlementPressureBlock({ data }: { data: EnhancementOverview['settleme
 /** 未来 7 天日常收付参考。 */
 function ForecastBlock({ data }: { data: EnhancementOverview['forecast'] }) {
   if (!data.available) {
+    // 完全没有历史数据时，后端提示里已经带了「其它功能照常可用」，
+    // 这里只在提示没有覆盖到的情况下补一句，避免同一句话出现两次。
+    const needsFallbackNote = !(data.message ?? '').includes('照常可用');
     return (
       <Alert
         type="info"
@@ -154,9 +159,11 @@ function ForecastBlock({ data }: { data: EnhancementOverview['forecast'] }) {
         description={
           <>
             <div>{data.message}</div>
-            <div style={{ marginTop: 8 }}>
-              今日可提用金额、现金事件、情景分析、家庭协同与经营咨询都照常可用。
-            </div>
+            {needsFallbackNote ? (
+              <div style={{ marginTop: 8 }}>
+                今日可提用金额、现金事件、情景分析、家庭协同与经营咨询都照常可用。
+              </div>
+            ) : null}
           </>
         }
       />
