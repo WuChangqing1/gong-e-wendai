@@ -407,12 +407,32 @@ def build_plan(profile, *, reference_at: datetime, dry_run: bool) -> Plan:
 
     from app.models.cash import CashEvent
     from app.models.consultation import ConsultationCase
-    from app.models.enhancement import DailyCashHistory, SettlementRecord
+    from app.models.enhancement import (
+        DailyCashHistory,
+        ReserveAdviceConfirmation,
+        SettlementRecord,
+    )
     from app.models.household import Household, HouseholdCard
     from app.models.merchant import BusinessAccountSnapshot
 
     plan = Plan()
     db = profile._sa_instance_state.session  # type: ignore[attr-defined]
+
+    # --- 经营留底（只在首次建设时校准） ---
+    reserve_confirmed = db.scalar(
+        select(ReserveAdviceConfirmation.id)
+        .where(ReserveAdviceConfirmation.merchant_id == profile.id)
+        .limit(1)
+    )
+    if (
+        int(profile.default_buffer_amount_cents) != BUFFER_CENTS
+        and reserve_confirmed is None
+    ):
+        plan.add(
+            "buffer",
+            f"经营留底校准为 {BUFFER_CENTS // 100} 元"
+            f"（当前 {profile.default_buffer_amount_cents // 100} 元）",
+        )
 
     # --- 资金时点 ---
     latest = db.scalar(
@@ -596,13 +616,28 @@ def apply_merchant_data(
 
     service = CashEventService(db)
 
-    # 0) 经营留底：核心算例要求 600 元。留底口径由用户确认，这里只在
-    #    与目标值不一致时校准，并记录在档案备注里。
+    # 0) 经营留底：核心算例要求 600 元，只在**首次建设**时校准。
+    #    留底是经营者自己的业务设置：一旦他在页面上确认过留底建议，
+    #    再跑本脚本就绝不能把它改回去（否则会静默覆盖用户的真实决策）。
+    from app.models.enhancement import ReserveAdviceConfirmation  # noqa: PLC0415
+
+    confirmed = db.scalar(
+        select(ReserveAdviceConfirmation.id)
+        .where(ReserveAdviceConfirmation.merchant_id == profile.id)
+        .limit(1)
+    )
     if int(profile.default_buffer_amount_cents) != BUFFER_CENTS:
-        profile.default_buffer_amount_cents = BUFFER_CENTS
-        db.commit()
-        if verbose:
-            print(f"  ✓ 经营留底校准为 {BUFFER_CENTS // 100} 元")
+        if confirmed is not None:
+            if verbose:
+                print(
+                    f"  · 经营留底已是经营者确认过的 "
+                    f"{profile.default_buffer_amount_cents // 100} 元，保持不变"
+                )
+        else:
+            profile.default_buffer_amount_cents = BUFFER_CENTS
+            db.commit()
+            if verbose:
+                print(f"  ✓ 经营留底校准为 {BUFFER_CENTS // 100} 元")
 
     # 1) 新的资金时点（历史时点保留）
     latest = db.scalar(

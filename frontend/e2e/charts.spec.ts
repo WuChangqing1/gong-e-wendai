@@ -85,8 +85,8 @@ test.describe('图表化分析', () => {
     await loginViaUi(page, fixture.user.username);
 
     for (const [route, forbidden] of [
-      ['/today', ['确定性计算引擎', '计算引擎版本', '字段：']],
-      ['/analysis', ['说明与口径', '换成图形表达']],
+      ['/today', ['确定性计算引擎', '计算引擎版本', '引擎版本', '字段：']],
+      ['/analysis', ['说明与口径', '换成图形表达', '引擎版本', '计算时间']],
       ['/settings', ['API Key', '密钥', '环境变量', '文字识别模型']],
     ] as const) {
       await gotoAuthed(page, route);

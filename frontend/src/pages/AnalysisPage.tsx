@@ -24,7 +24,7 @@ import {
   Tooltip,
 } from 'antd';
 import { DeleteOutlined, PlusOutlined, ReloadOutlined, ShareAltOutlined } from '@ant-design/icons';
-import dayjs, { type Dayjs } from 'dayjs';
+import type { Dayjs } from 'dayjs';
 
 import { analysisApi, cashEventApi, scenarioApi } from '@/api/cashflow';
 import { errorMessage } from '@/api/client';
@@ -604,13 +604,6 @@ export default function AnalysisPage() {
 
       {analysisQuery.isLoading ? (
         <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 24 }}>正在计算…</div>
-      ) : null}
-
-      {analysisQuery.dataUpdatedAt ? (
-        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-          计算时间 {dayjs(analysisQuery.dataUpdatedAt).format('YYYY-MM-DD HH:mm:ss')} · 引擎版本{' '}
-          {result?.engine_version}
-        </div>
       ) : null}
     </div>
   );

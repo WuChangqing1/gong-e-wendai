@@ -273,5 +273,28 @@ max_withdrawable_cents=0   opening_balance_cents=60000   buffer_cents=60000
 脚本先在**生产库副本**上演练：报告 → `--apply` → 逐表核对 → 24 项孤儿检查全 0，
 确认无误后才在真实库上执行。
 
+### 9.8 经营者真实操作与随后的口径变化（2026-10-04 11:18）
+
+部署后经营者（`wangzhanggui` 本人）在公网页面点击了
+「建议经营留底 → 确认采用 ¥1,200.00」，库里留下：
+
+| 项目 | 值 |
+| --- | --- |
+| `reserve_advice_confirmations` | 前值 600 元 → 建议 1200 元 → 确认 1200 元 |
+| 审计 | `enhancement.reserve_confirmed`（操作人：王掌柜） |
+| 影响 | `merchant_profiles.default_buffer_amount_cents` 600 → 1200 元 |
+
+这同时是 C3 修复的**真实验收**：修复前非默认参数下这条「确认」会稳定 409，
+这次操作一次成功并正确落库。留底变化后的口径：
+
+| 调用 | 结果 |
+| --- | --- |
+| `/analysis/today` | `FEASIBLE`，可提用 **60000**（600 元），最紧时点余额 180000 |
+| `/analysis/run {joint, delay_days: 2}` | `PAYMENT_GAP`，付款缺口 20000 / 留底缺口 140000，`binding_scenario_index=1` |
+
+数据建设脚本随之调整：**只在首次建设时**校准留底；存在留底确认记录时
+不再改动该值（避免再次运行脚本静默覆盖经营者自己的业务设置）。
+
+
 
 
