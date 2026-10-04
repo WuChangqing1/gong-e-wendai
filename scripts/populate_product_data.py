@@ -1161,6 +1161,16 @@ def build_history_rows(reference_at: datetime, days: int = HISTORY_DAYS) -> list
 # 入口
 # ---------------------------------------------------------------------------
 def main(argv: list[str] | None = None) -> int:
+    # Windows 控制台默认 GBK，进度行里的「✓」会让脚本在中途抛 UnicodeEncodeError：
+    # 数据可能已经写入，使用者却看到报错。统一按 UTF-8 输出。
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (ValueError, OSError):  # pragma: no cover - 仅少数受限环境
+                pass
+
     parser = argparse.ArgumentParser(
         description="为正式业务账号建设完整产品数据（幂等，仅增量）"
     )

@@ -38,6 +38,23 @@ sys.path.insert(0, str(BACKEND_DIR))
 
 ALPHABET = string.ascii_letters + string.digits
 
+
+def _ensure_utf8_output() -> None:
+    """把标准输出切成 UTF-8。
+
+    Windows 控制台默认代码页是 GBK，打印「✓」会抛 ``UnicodeEncodeError``：
+    账户其实已经开通并提交，脚本却以非零码退出、凭据文件也没写成，
+    使用者会误以为开通失败并重复执行。这里统一按 UTF-8 输出，避免半途而废。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):  # pragma: no cover - 仅少数受限环境
+            pass
+
 #: 与 ``app.schemas.user.USERNAME_PATTERN`` 保持一致。
 USERNAME_MIN = 4
 USERNAME_MAX = 32
@@ -86,6 +103,7 @@ def _check_environment() -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _ensure_utf8_output()
     parser = argparse.ArgumentParser(
         description="开通咨询人员身份（密码随机生成，不打印到终端）",
         formatter_class=argparse.RawDescriptionHelpFormatter,
