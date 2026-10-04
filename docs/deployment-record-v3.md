@@ -162,6 +162,7 @@ max_withdrawable_cents=0   opening_balance_cents=60000   buffer_cents=60000
 | 迁移 | 无新增迁移，仍为 `7b1c4d9e2f30 (head)` |
 | 服务 | `active`，`NRestarts=0`，`/api/v1/health` = `ok / database ok / ai_enabled true` |
 | 既有项目 | 18082 / 18088 均 200 |
+| 部署后文档提交 | `1569618`、`39122c5`（`git diff d385c42..39122c5` 仅 docs/，运行时代码与生产一致） |
 
 ### 9.2 正式业务数据（`scripts/populate_product_data.py --apply`）
 
