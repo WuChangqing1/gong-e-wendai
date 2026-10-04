@@ -139,7 +139,6 @@ export default function FamilyPage() {
     <div className="gew-stack">
       <PageHeader
         title="家庭协同"
-        subtitle="经营资金与家庭资金高度关联，但共同决策者不一定在现场。这里用于把关键结论同步给家人并取得反馈。"
         extra={
           household ? (
             <Space wrap>

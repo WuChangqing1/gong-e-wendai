@@ -188,7 +188,6 @@ export default function ConsultationsPage() {
     <div className="gew-stack">
       <PageHeader
         title="经营咨询"
-        subtitle="某一笔结算、到账或经营资金事项不明确时，整理最小必要信息发起咨询，收到结果后再更新收付款事项。"
         extra={
           <Space wrap>
             <Button

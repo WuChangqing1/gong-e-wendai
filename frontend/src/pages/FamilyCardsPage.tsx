@@ -218,7 +218,6 @@ export default function FamilyCardsPage() {
     <div className="gew-stack">
       <PageHeader
         title="家庭协同"
-        subtitle="这里只显示经营者明确分享给你的协同卡片。经营流水、账户余额与未分享的内容不会展示。"
         extra={
           <Button
             icon={<ReloadOutlined />}

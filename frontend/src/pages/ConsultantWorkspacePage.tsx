@@ -183,7 +183,6 @@ export default function ConsultantWorkspacePage({ onlyRecords = false }: { onlyR
     <div className="gew-stack">
       <PageHeader
         title={onlyRecords ? '事项记录' : '咨询工作台'}
-        subtitle="核实商户提交的经营资金事项。你可以改变状态、要求补充资料、填写核实结果，但不能直接修改商户的收付款事项。"
         extra={
           <Button
             icon={<ReloadOutlined />}

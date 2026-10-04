@@ -743,12 +743,6 @@ a:hover {
   font-weight: 600;
 }
 
-.gew-page-subtitle {
-  margin: 0 0 var(--space-5);
-  color: var(--text-secondary);
-  font-size: 13px;
-}
-
 .gew-stack {
   display: flex;
   flex-direction: column;
@@ -1230,10 +1224,6 @@ a:hover {
     clip-path: inset(50%);
     white-space: nowrap;
     border: 0;
-  }
-
-  .gew-page-subtitle {
-    margin-bottom: var(--space-3);
   }
 
   /* 页头标题与页面标题重复：窄屏顶部改为「品牌 + 当前导航项」，与底部导航形成呼应 */

@@ -212,7 +212,6 @@ export default function AnalysisPage() {
     <div className="gew-stack">
       <PageHeader
         title="情景分析"
-        subtitle="比较不同到账时间下的资金变化"
         extra={
           <Space wrap>
             <Segmented
@@ -268,9 +267,6 @@ export default function AnalysisPage() {
                 </Button>
               ))}
             </Space>
-          </div>
-          <div className="gew-delay-row__hint">
-            共同约束模式下，系统分别计算按时到账与延迟到账，并取两者中最保守的可提用上限。
           </div>
         </SectionCard>
       ) : null}

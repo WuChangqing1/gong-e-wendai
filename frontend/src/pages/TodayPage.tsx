@@ -209,14 +209,7 @@ export default function TodayPage() {
    */
   const moneyCharts = result ? (
     <>
-      <SectionCard
-        title="未来 7 天资金趋势"
-        extra={
-          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            阶梯线表示余额在每笔事项发生时的跳变
-          </span>
-        }
-      >
+      <SectionCard title="未来 7 天资金趋势">
         {/* 图表 chunk 按需加载；Suspense 只包住图表本身，不阻塞页面其余部分 */}
         <Suspense fallback={<ChartLoading height={320} />}>
           <CashflowChartLazy scenarios={scenarios} bufferCents={result.buffer_cents} />
@@ -234,11 +227,6 @@ export default function TodayPage() {
     <div className="gew-stack">
       <PageHeader
         title="今日决策"
-        subtitle={
-          overview?.snapshot_at
-            ? `资金时点 ${formatDateTime(overview.snapshot_at)} · 已确认事项按未来 7 天推演`
-            : '尚未登记经营资金时点'
-        }
         extra={
           <Space wrap>
             <Segmented
@@ -452,12 +440,6 @@ export default function TodayPage() {
                     </Button>
                     <Button onClick={() => navigate('/family')}>进入家庭协同</Button>
                   </Space>
-                  <div style={{ marginTop: 12 }}>
-                    <InlineNote>
-                      默认只分享结论字段（可提用金额、最紧时点、关键付款、风险摘要），
-                      完整经营余额与全部交易明细默认不分享。
-                    </InlineNote>
-                  </div>
                 </SectionCard>
               </div>
             </Col>

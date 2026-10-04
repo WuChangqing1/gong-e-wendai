@@ -562,7 +562,7 @@ export default function SettingsPage() {
 
   return (
     <div className="gew-stack">
-      <PageHeader title="我的" subtitle="个人资料、经营资料、留底设置、家庭设置与安全设置" />
+      <PageHeader title="我的" />
 
       {isMobile ? (
         activeSection ? (

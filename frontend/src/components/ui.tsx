@@ -92,13 +92,17 @@ export function SectionCard({
   );
 }
 
+/**
+ * 页头：只有标题与右侧操作区。
+ *
+ * 刻意**不支持**副标题：页面标题下面再写一句「这一页是干什么的」，
+ * 既占位置又像产品说明，真正的口径说明应当出现在它约束的那块内容旁边。
+ */
 export function PageHeader({
   title,
-  subtitle,
   extra,
 }: {
   title: ReactNode;
-  subtitle?: ReactNode;
   extra?: ReactNode;
 }) {
   return (
@@ -107,7 +111,6 @@ export function PageHeader({
         {/* 手机端由 CSS 把这个 H1 视觉隐藏（顶部栏已显示当前页面名），
             但仍留在 DOM 中，保证屏幕阅读器与自动化用例能定位到页面标题。 */}
         <h1 className="gew-page-title">{title}</h1>
-        {subtitle ? <p className="gew-page-subtitle">{subtitle}</p> : null}
       </div>
       {extra ? <div className="gew-page-header__extra">{extra}</div> : null}
     </div>

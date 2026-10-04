@@ -360,7 +360,6 @@ export default function EventsPage() {
     <div className="gew-stack">
       <PageHeader
         title="现金事件"
-        subtitle="这里是你已经规范化的收付款事项。只有状态为「计划中」的事项会进入未来 7 天推演。"
         extra={
           <Space wrap>
             <Button icon={<RobotOutlined />} onClick={() => setSmartOpen(true)}>
