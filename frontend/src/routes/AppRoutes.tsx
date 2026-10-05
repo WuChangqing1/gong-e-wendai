@@ -78,7 +78,19 @@ export default function AppRoutes() {
             </RequireRole>
           }
         />
-        <Route path="/family/cards" element={<FamilyCardsPage />} />
+        {/*
+          「家庭协同（家人视角）」只属于家庭成员：经营者用自己的 /family，
+          咨询人员没有家庭入口。此前这里没有任何角色守卫，
+          任何已登录用户手输地址都能进入。
+        */}
+        <Route
+          path="/family/cards"
+          element={
+            <RequireRole roles={['family_member']}>
+              <FamilyCardsPage />
+            </RequireRole>
+          }
+        />
         <Route
           path="/consultations"
           element={
