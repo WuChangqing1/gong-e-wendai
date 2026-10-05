@@ -102,6 +102,24 @@ test.describe('经营咨询', () => {
     await expect(page.getByText('咨询已提交，咨询人员会尽快受理')).toBeVisible({ timeout: 15_000 });
   });
 
+  test('咨询人员不能加入家庭，也不能进入家人视角', async ({ page }) => {
+    const consultant = provisionConsultant(uniqueName('nofamily'));
+    await loginViaUi(page, consultant.username, consultant.password);
+    await expect(page).toHaveURL(/\/consultant/, { timeout: 25_000 });
+
+    // 1) 后端：加入家庭是家庭成员的动作，咨询人员直接调用也要被拒绝
+    const join = await page.request.post(apiUrl('households', 'join'), {
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      data: { invite_code: 'ABCD1234' },
+    });
+    expect(join.status(), await join.text()).toBe(403);
+
+    // 2) 前端：手输地址进家人视角 → 403，而不是看到家庭卡片
+    await page.goto(appUrl('/family/cards'));
+    await expect(page.getByText('没有访问权限')).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText('尚未创建家庭')).toBeHidden();
+  });
+
   test('咨询人员受理核实，且无法访问经营数据', async ({ page, request }) => {
     // 咨询人员不能自助注册，也没有管理员后台可以开通。
     // V3 起统一走与生产一致的开通脚本：scripts/provision_consultant.py。
