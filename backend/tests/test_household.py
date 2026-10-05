@@ -340,7 +340,11 @@ class TestCards:
             },
         ).json()
         assert card["payload"]["payment_gap_cents"] == 200_00
-        assert "缺口" in card["payload"]["risk_summary"]
+        # 文案只表达「有缺口」，金额只出现在独立字段里
+        assert card["payload"]["risk_summary"] == (
+            "未来 7 天存在付款缺口，建议优先确认近期付款与到账安排。"
+        )
+        assert "¥" not in card["payload"]["risk_summary"]
 
     def test_risk_summary_alone_does_not_leak_gap_amounts(self, family):
         """只勾「风险摘要」时，缺口与余额一律不出现（最小披露）。"""
@@ -367,6 +371,12 @@ class TestCards:
         ):
             assert leaked not in payload, leaked
 
+        # 摘要文案本身也不能含金额：没有货币符号，「未来 7 天」之外没有数字
+        text = payload["risk_summary"]
+        assert "¥" not in text
+        assert "200" not in text and "1800" not in text
+        assert not any(ch.isdigit() for ch in text.replace("未来 7 天", ""))
+
     def test_limiting_point_does_not_bring_balance(self, family):
         """勾「最紧张时间」只给出时间，不给出余额或期末余额。"""
         analysis = family["client"].post(
@@ -392,13 +402,14 @@ class TestCards:
             "/api/v1/household-cards",
             json={
                 "card_type": "revision",
-                # 变更摘要只表示「有一笔事项变更过」，不含事项细节
+                # 变更摘要来自真实版本记录；该事项创建后从未更正过，因此没有摘要可分享
                 "shared_fields": ["revision_summary"],
                 "cash_event_id": event_id,
             },
         ).json()
         assert card["card_type"] == "revision"
         assert card["cash_event_id"] == event_id
+        assert "revision_summary" not in card["payload"]
         for leaked in ("event_title", "event_amount_cents", "event_scheduled_at", "event_version"):
             assert leaked not in card["payload"], leaked
 

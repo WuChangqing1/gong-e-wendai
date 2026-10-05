@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import Conflict, Forbidden, NotFound, ValidationFailed
 from app.core.security import generate_invite_code
-from app.models.cash import AnalysisResult, CashEvent
+from app.models.cash import AnalysisResult, CashEvent, CashEventRevision
 from app.models.household import (
     CARD_DECISION,
     CARD_REVISION,
@@ -29,6 +29,7 @@ from app.models.household import (
 )
 from app.models.merchant import MerchantProfile
 from app.models.user import User
+from app.repositories.cash_event_repo import RevisionRepository
 from app.schemas.household import (
     CardCommentOut,
     CardOut,
@@ -36,8 +37,10 @@ from app.schemas.household import (
     HouseholdOut,
     MemberOut,
 )
-from app.utils.money import format_cny
-from app.utils.timeutil import utcnow
+from app.services.cash_engine import AnalysisStatus
+from app.services.event_service import diff_snapshots
+from app.utils.money import format_cny, format_cny_grouped
+from app.utils.timeutil import to_utc, utcnow
 
 #: 允许分享的字段白名单
 #
@@ -84,8 +87,10 @@ FIELD_LABELS = {
 }
 
 #: 字段 → 产出的 payload 键。**逐项对应**，没有勾选就不生成。
-#: 事项级字段（event_*）只在 ``key_payments`` 下生成；``revision_summary`` 只允许
-#: 接收端知道「有一笔事项发生过变更」，不提供任何事项细节。
+#: 事项级字段（event_*）只在 ``key_payments`` 下生成；``revision_summary`` 只带
+#: 事项名称与真实的版本差异，不提供其它事项细节。
+#: 注意：``revision_summary`` 在没有可用版本记录时**整个键都不生成**（见
+#: :meth:`HouseholdService._revision_summary`），不能假装有摘要。
 SHARED_FIELD_OUTPUTS: dict[str, tuple[str, ...]] = {
     "max_withdrawable": ("max_withdrawable_cents",),
     "planned_amount": ("planned_household_amount_cents",),
@@ -97,7 +102,31 @@ SHARED_FIELD_OUTPUTS: dict[str, tuple[str, ...]] = {
     "payment_gap": ("payment_gap_cents",),
     "buffer_gap": ("buffer_gap_cents",),
     "pending_inflows": ("pending_inflows",),
-    "revision_summary": (),
+    "revision_summary": ("revision_summary",),
+}
+
+#: 风险摘要文案：**只表达状态语义，永远不含任何金额**。
+#:
+#: 为什么不能带金额：只勾「风险摘要」时，带出「缺口 ¥X」「最紧时点余额 ¥Y」
+#: 等于把用户没有勾选的字段隐式分享给家人。金额只能通过独立的
+#: ``payment_gap`` / ``buffer_gap`` / ``limiting_balance`` / ``end_balance`` 分享。
+RISK_SUMMARY_TEXTS: dict[str, str] = {
+    AnalysisStatus.PAYMENT_GAP: "未来 7 天存在付款缺口，建议优先确认近期付款与到账安排。",
+    AnalysisStatus.BELOW_BUFFER: "未来 7 天预计会低于经营留底，建议暂缓增加家庭提用。",
+    AnalysisStatus.FEASIBLE: "当前已确认的收付款安排可以覆盖。",
+    AnalysisStatus.INPUT_INCOMPLETE: "部分收付款信息尚待确认。",
+}
+
+#: 更正摘要里的字段中文标签：产品口径要求的 7 个字段用这里的固定标签，
+#: 其余字段（事项编号 / 事项类型 / 同刻次序）沿用 ``event_service`` 的通用标签。
+REVISION_FIELD_LABELS = {
+    "amount_cents": "金额",
+    "scheduled_at": "预计时间",
+    "state": "状态",
+    "direction": "收支方向",
+    "title": "事项名称",
+    "note": "备注",
+    "source_label": "来源",
 }
 
 #: 事项级字段的产物；只有勾选 ``key_payments`` 才会出现。
@@ -339,21 +368,20 @@ class HouseholdService:
                     payload["limiting_event_title"] = title
 
             if wanted("pending_inflows"):
-                payload["pending_inflows"] = [
-                    {
-                        "title": item.title,
-                        "amount_text": item.amount_text,
-                        "scheduled_at": item.scheduled_at.isoformat(),
-                    }
-                    for item in analysis.pending_inflows_at_limit
-                ]
+                payload["pending_inflows"] = self._pending_inflows(analysis)
 
-        # 事项级字段只由「关键经营付款」带出；变更摘要不提供事项细节。
+        # 事项级字段只由「关键经营付款」带出；变更摘要只带名称与真实版本差异。
         if cash_event is not None and wanted(EVENT_FIELD_GATE):
             payload["event_title"] = cash_event.title
             payload["event_amount_cents"] = cash_event.amount_cents
             payload["event_scheduled_at"] = cash_event.scheduled_at.isoformat()
             payload["event_version"] = cash_event.current_version
+
+        if cash_event is not None and wanted("revision_summary"):
+            revision_summary = self._revision_summary(cash_event)
+            # 拿不到真实版本记录时不生成该键：宁可没有摘要，也不假装有。
+            if revision_summary is not None:
+                payload["revision_summary"] = revision_summary
 
         if planned_amount_cents is not None and wanted("planned_amount"):
             payload["planned_household_amount_cents"] = int(planned_amount_cents)
@@ -361,15 +389,26 @@ class HouseholdService:
         if card_type == CARD_RISK and wanted("risk_summary") and analysis is not None:
             payload.setdefault("risk_summary", self._risk_summary(analysis))
 
+        # 勾了「尚未到账的收入」却没有任何内容可分享时一律拒绝：
+        # 空数组在接收端只会渲染成一块空白，等于分享了一张没有内容的卡片。
+        # 这里覆盖预览与创建两条路径（创建复用 :meth:`build_preview`），
+        # 也覆盖「没有分析结果」的情况 —— 不能只靠前端把选项置灰。
+        if wanted("pending_inflows") and not payload.get("pending_inflows"):
+            raise ValidationFailed(
+                "当前没有尚未到账的收入，请取消该项后再分享",
+                code="NO_PENDING_INFLOW_TO_SHARE",
+            )
+
         return payload
 
     @staticmethod
-    def _scenario_zero(analysis: AnalysisResult) -> dict:
-        """权威情景。
+    def _binding_scenario(analysis: AnalysisResult) -> dict:
+        """绑定情景：顶层结论真正来自的那个情景。
 
-        共同约束模式的 ``scenarios[0]`` 是「按当前计划」，而顶层结论可能绑定
-        另一个情景。``payload`` 现在记录了 ``binding_scenario_index``，这里优先用它，
-        保证分享出去的数字与用户看到的结论来自同一个情景。
+        为什么不能固定取 ``scenarios[0]``：共同约束模式下 ``scenarios[0]`` 是
+        「按当前计划」，而顶层结论绑定的是最保守的情景。``payload`` 里的
+        ``binding_scenario_index`` 记录了它；缺失或越界时安全回退到
+        ``scenarios[0]``（旧数据没有这个键）。
         """
         payload = analysis.payload or {}
         scenarios = payload.get("scenarios") or []
@@ -386,45 +425,155 @@ class HouseholdService:
 
     @classmethod
     def _end_balance(cls, analysis: AnalysisResult) -> int | None:
-        """期末余额：取自引擎结果（场景 0），不重新计算。"""
-        value = cls._scenario_zero(analysis).get("end_balance_cents")
+        """期末余额：取自绑定情景的引擎结果，不重新计算。"""
+        value = cls._binding_scenario(analysis).get("end_balance_cents")
         return int(value) if isinstance(value, int) else None
 
     @staticmethod
     def _risk_summary(analysis: AnalysisResult) -> str:
-        if analysis.payment_gap_cents > 0:
-            return (
-                f"未来 7 天会出现付款缺口 {format_cny(analysis.payment_gap_cents)}，"
-                f"最紧张时点余额 {format_cny(analysis.limiting_balance_cents)}。"
-            )
-        if analysis.buffer_gap_cents > 0:
-            return (
-                f"未来 7 天余额将低于经营留底，留底缺口 {format_cny(analysis.buffer_gap_cents)}。"
-            )
-        return "未来 7 天已确认的收付款事项都可以覆盖，资金安排可行。"
+        """风险摘要：**永远不含任何金额**，只表达状态语义。
 
-    @staticmethod
-    def _key_payment_title(analysis: AnalysisResult) -> str | None:
+        金额只能通过 ``payment_gap`` / ``buffer_gap`` / ``limiting_balance`` /
+        ``end_balance`` 这些独立字段分享；摘要里出现数字就等于隐式带出。
+        """
+        status = AnalysisStatus.coerce(analysis.status)
+        if status is None:
+            # 历史数据兜底：状态无法识别时按缺口语义回退，
+            # 避免把「其实有缺口」说成「可以覆盖」。
+            if analysis.payment_gap_cents > 0:
+                status = AnalysisStatus.PAYMENT_GAP
+            elif analysis.buffer_gap_cents > 0:
+                status = AnalysisStatus.BELOW_BUFFER
+            else:
+                status = AnalysisStatus.FEASIBLE
+        return RISK_SUMMARY_TEXTS[status]
+
+    @classmethod
+    def _pending_inflows(cls, analysis: AnalysisResult) -> list[dict]:
+        """最紧时点之后尚未到账的收入（与顶层结论同源）。
+
+        ``AnalysisResult`` 只持久化 ``payload``（内含各情景曲线），没有独立的
+        ``pending_inflows_at_limit`` 列，因此必须从**绑定情景**的曲线里读取；
+        固定取 ``scenarios[0]`` 会和共同约束的绑定情景不一致。
+
+        只输出接收端需要的三个键：内部 ``event_id`` 不属于分享内容。
+        """
+        items = cls._binding_scenario(analysis).get("pending_inflows_at_limit") or []
+        if not isinstance(items, list):
+            return []
+        result: list[dict] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            title = item.get("title")
+            amount_text = item.get("amount_text")
+            scheduled_at = item.get("scheduled_at")
+            if not title or not amount_text or not scheduled_at:
+                continue
+            result.append(
+                {
+                    "title": str(title),
+                    "amount_text": str(amount_text),
+                    "scheduled_at": str(scheduled_at),
+                }
+            )
+        return result
+
+    def _revision_summary(self, cash_event: CashEvent) -> dict | None:
+        """更正通知的「改前 → 改后」摘要。
+
+        数据来源**必须**是 ``cash_event_revisions`` 的真实版本记录：在内存里比较
+        对象只会得到一份没有留痕的差异，接收端无法追溯它出自哪一次更正。
+
+        取该事项最新一条 ``material=True``（金额 / 时间 / 方向 / 状态）的版本，
+        只有非实质性改动时退而取最新一条；创建记录没有「改前」，不构成更正。
+        找不到版本或没有差异时返回 ``None``，由调用方不生成该键。
+
+        输出结构（键名固定，供接收端直接渲染）::
+
+            {"event_title", "version", "changed_at", "change_reason",
+             "changes": [{"field", "label", "before", "after",
+                          "before_text", "after_text"}]}
+        """
+        revisions: list[CashEventRevision] = RevisionRepository(self.db).list_for_event(
+            cash_event.id
+        )  # 版本倒序
+        # 创建记录（``before`` 为空）不是「改前 → 改后」，不参与摘要。
+        usable = [row for row in revisions if row.before_json]
+        if not usable:
+            return None
+        material = [row for row in usable if row.material]
+        row = material[0] if material else usable[0]
+
+        changes = diff_snapshots(row.before_json, row.after_json)
+        if not changes:
+            return None
+
+        rendered: list[dict] = []
+        for change in changes:
+            # 只输出对外约定的 6 个键（``diff_snapshots`` 还带有内部用的 ``material``）。
+            # ``before_text`` / ``after_text`` 保证是字符串：接收端直接渲染，
+            # 旧值为空时给出可读文案而不是 null。
+            before_text = change["before_text"]
+            after_text = change["after_text"]
+            if change["field"] == "amount_cents":
+                # 金额统一带千分位，和页面其它地方看到的写法一致
+                # （``diff_snapshots`` 用的 ``format_cny`` 不带千分位）。
+                before_text = (
+                    format_cny_grouped(int(change["before"]))
+                    if change["before"] is not None
+                    else None
+                )
+                after_text = (
+                    format_cny_grouped(int(change["after"]))
+                    if change["after"] is not None
+                    else None
+                )
+            rendered.append(
+                {
+                    "field": change["field"],
+                    "label": REVISION_FIELD_LABELS.get(change["field"], change["label"]),
+                    "before": change["before"],
+                    "after": change["after"],
+                    "before_text": before_text or "（未填写）",
+                    "after_text": after_text or "（未填写）",
+                }
+            )
+
+        # 只带事项名称与差异，不顺带带出其它事项细节。
+        return {
+            "event_title": cash_event.title,
+            "version": int(row.version),
+            "changed_at": to_utc(row.changed_at).isoformat(),
+            "change_reason": row.change_reason,
+            "changes": rendered,
+        }
+
+    @classmethod
+    def _key_payment_title(cls, analysis: AnalysisResult) -> str | None:
         payload = analysis.payload or {}
         title = payload.get("limiting_event_title")
         if title:
             return str(title)
-        scenarios = payload.get("scenarios") or []
-        if scenarios and isinstance(scenarios, list):
-            points = scenarios[0].get("points") or []
-            limiting_ts = analysis.limiting_timestamp.isoformat() if analysis.limiting_timestamp else None
-            for point in points:
-                if point.get("timestamp") == limiting_ts and point.get("event_title"):
-                    return str(point["event_title"])
+        points = cls._binding_scenario(analysis).get("points") or []
+        if not isinstance(points, list):
+            return None
+        limiting_ts = analysis.limiting_timestamp.isoformat() if analysis.limiting_timestamp else None
+        for point in points:
+            if point.get("timestamp") == limiting_ts and point.get("event_title"):
+                return str(point["event_title"])
         return None
 
-    @staticmethod
-    def _key_payments(analysis: AnalysisResult) -> list[dict]:
-        payload = analysis.payload or {}
-        scenarios = payload.get("scenarios") or []
-        if not scenarios:
+    @classmethod
+    def _key_payments(cls, analysis: AnalysisResult) -> list[dict]:
+        """关键经营付款：取**绑定情景**（真正最保守的那个）的支出时点。
+
+        固定取 ``scenarios[0]`` 会把「按当前计划」的付款与余额分享出去，
+        而用户看到的结论可能来自另一个情景。
+        """
+        points = cls._binding_scenario(analysis).get("points") or []
+        if not isinstance(points, list):
             return []
-        points = scenarios[0].get("points") or []
         outflow_points = [
             {
                 "title": point.get("event_title"),
