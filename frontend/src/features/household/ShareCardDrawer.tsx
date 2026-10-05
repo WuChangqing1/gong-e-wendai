@@ -223,25 +223,27 @@ export default function ShareCardDrawer({
             <Typography.Text strong>分享内容预览</Typography.Text>
             {previewQuery.isLoading ? (
               <Spin style={{ marginTop: 12 }} />
-            ) : previewQuery.isError ? (
-              <div style={{ marginTop: 8 }}>
-                <InlineNote tone="warning">{errorMessage(previewQuery.error)}</InlineNote>
-              </div>
             ) : (
-              <div className="gew-kv-list" style={{ marginTop: 8 }}>
-                {previewItems.map((item) => (
-                  <div className="gew-kv-list__row" key={item.key}>
-                    <span className="gew-kv-list__key">{item.label}</span>
-                    <span className="gew-kv-list__value">{item.value}</span>
-                  </div>
-                ))}
-                {/* 勾了但确实没有内容时给出明确空状态，而不是留一片空白 */}
-                {pendingInflowsEmpty ? (
-                  <div className="gew-kv-list__row">
-                    <span className="gew-kv-list__key">尚未到账的收入</span>
-                    <span className="gew-kv-list__value">暂无</span>
-                  </div>
+              <div className="gew-stack" style={{ marginTop: 8 }}>
+                {/* 预览接口被后端拒绝时也要说清楚原因，而不是只留一个空框 */}
+                {previewQuery.isError ? (
+                  <InlineNote tone="warning">{errorMessage(previewQuery.error)}</InlineNote>
                 ) : null}
+                <div className="gew-kv-list">
+                  {previewItems.map((item) => (
+                    <div className="gew-kv-list__row" key={item.key}>
+                      <span className="gew-kv-list__key">{item.label}</span>
+                      <span className="gew-kv-list__value">{item.value}</span>
+                    </div>
+                  ))}
+                  {/* 勾了但确实没有内容时给出明确空状态，而不是留一片空白 */}
+                  {pendingInflowsEmpty ? (
+                    <div className="gew-kv-list__row">
+                      <span className="gew-kv-list__key">尚未到账的收入</span>
+                      <span className="gew-kv-list__value">暂无</span>
+                    </div>
+                  ) : null}
+                </div>
               </div>
             )}
           </div>
