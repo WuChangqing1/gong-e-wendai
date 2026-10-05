@@ -265,7 +265,13 @@ class ConsultationService:
     def close(
         self, case: ConsultationCase, actor: User, summary: str | None = None
     ) -> ConsultationCase:
-        if not (actor.has_role(ROLE_CONSULTANT) or case.merchant_id):
+        """完成咨询：咨询人员**或该事项所属经营者本人**。
+
+        ``case.merchant_id`` 只是被咨询商户的 id，它永远是非空字符串，
+        不能拿来代表「actor 属于该商户」—— 那样任何登录用户都能关闭别人的咨询。
+        必须显式判断 actor 是否就是该商户的账号。
+        """
+        if not (actor.has_role(ROLE_CONSULTANT) or self._is_case_owner(case, actor)):
             raise Forbidden("没有权限完成该事项")
         self._ensure_transition(case, CASE_CLOSED)
         previous = case.status
@@ -336,6 +342,11 @@ class ConsultationService:
         self.db.commit()
         self.db.refresh(updated)
         return updated, list(revision.changed_fields) if revision else []
+
+    def _is_case_owner(self, case: ConsultationCase, actor: User) -> bool:
+        """actor 是否就是该咨询所属经营主体的账号（按 MerchantProfile 关联判断）。"""
+        merchant_id = self._merchant_id_of(actor)
+        return merchant_id is not None and merchant_id == case.merchant_id
 
     def _merchant_id_of(self, user: User) -> str | None:
         profile = self.db.scalar(
