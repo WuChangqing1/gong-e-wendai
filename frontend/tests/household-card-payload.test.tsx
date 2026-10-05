@@ -42,6 +42,7 @@ const PAYLOAD_KEYS = [
   'payment_gap_cents',
   'buffer_gap_cents',
   'pending_inflows',
+  'revision_summary',
 ];
 
 describe('分享字段标签', () => {
@@ -104,5 +105,63 @@ describe('协同卡 payload 渲染', () => {
   it('结构型数据不会以 JSON 形式泄露', () => {
     const items = buildCardPayloadItems({ risk_summary: { nested: true } });
     expect(items[0].value).toBe('—');
+  });
+
+  it('空列表显示「暂无」而不是一片空白', () => {
+    const items = buildCardPayloadItems({ pending_inflows: [] });
+    expect(items[0].label).toBe('尚未到账的收入');
+    expect(items[0].value).toBe('暂无');
+  });
+
+  it('更正通知卡渲染「改前 → 改后」，且不显示内部字段名', async () => {
+    const { render, screen } = await import('@testing-library/react');
+    const items = buildCardPayloadItems({
+      revision_summary: {
+        event_title: '鲜食原料采购',
+        version: 3,
+        changed_at: '2026-10-04T01:00:00+00:00',
+        change_reason: 'product-data: 按实际单据修正',
+        changes: [
+          {
+            field: 'amount_cents',
+            label: '金额',
+            before: 130_000,
+            after: 140_000,
+            before_text: '¥1,300.00',
+            after_text: '¥1,400.00',
+          },
+        ],
+      },
+    });
+
+    render(
+      <div>
+        {items.map((item) => (
+          <div key={item.key}>
+            <span>{item.label}</span>
+            <span>{item.value}</span>
+          </div>
+        ))}
+      </div>,
+    );
+
+    expect(screen.getByText('事项变更摘要')).toBeInTheDocument();
+    expect(screen.getByText('事项：鲜食原料采购')).toBeInTheDocument();
+    expect(screen.getByText('金额')).toBeInTheDocument();
+    expect(screen.getByText('¥1,300.00')).toBeInTheDocument();
+    expect(screen.getByText('¥1,400.00')).toBeInTheDocument();
+    // 只显示中文标签与可读文本，内部字段名不进入界面
+    expect(document.body.textContent ?? '').not.toContain('amount_cents');
+  });
+
+  it('没有真实差异时不渲染空的更正摘要', async () => {
+    const { render } = await import('@testing-library/react');
+    const items = buildCardPayloadItems({
+      revision_summary: { event_title: '鲜食原料采购', version: 3, changes: [] },
+    });
+    // 只断言本次渲染的容器，避免受其它用例残留 DOM 影响
+    const { container } = render(<div>{items[0].value}</div>);
+    expect(container.textContent).not.toContain('鲜食原料采购');
+    expect(container.textContent?.trim()).toBe('—');
   });
 });

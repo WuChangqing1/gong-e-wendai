@@ -20,7 +20,7 @@ from app.core.database import get_db
 from app.core.errors import Forbidden, NotFound
 from app.models.household import CARD_TYPES
 from app.models.merchant import MerchantProfile
-from app.models.user import ROLE_MERCHANT, User
+from app.models.user import ROLE_FAMILY_MEMBER, ROLE_MERCHANT, User
 from app.repositories.user_repo import AuditService
 from app.schemas.common import MessageResponse
 from app.schemas.household import (
@@ -120,6 +120,11 @@ def join_household(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
+    # 加入家庭是「家庭成员」这个身份的动作：经营者有自己的 /family 入口，
+    # 咨询人员根本没有家庭入口。只靠前端隐藏不算权限控制。
+    if not user.has_role(ROLE_FAMILY_MEMBER):
+        raise Forbidden("只有家庭成员可以使用邀请码加入家庭", code="FAMILY_MEMBER_ONLY")
+
     service = HouseholdService(db)
     household, membership = service.join_by_invite(
         user, payload.invite_code, payload.relation_label

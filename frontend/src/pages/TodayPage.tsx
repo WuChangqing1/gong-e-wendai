@@ -51,13 +51,21 @@ import { useIsMobile } from '@/hooks/useResponsive';
 import type { AnalysisMode, AnalysisResult } from '@/types';
 import { formatCny, splitCny } from '@/utils/money';
 import { formatDateTime } from '@/utils/datetime';
-import { FEASIBLE_ZERO_DETAIL, STATUS_TONE, decisionCopy } from '@/utils/labels';
+import {
+  FEASIBLE_ZERO_DETAIL,
+  STATUS_TONE,
+  decisionAmountCents,
+  decisionCopy,
+} from '@/utils/labels';
 
 const MODE_OPTIONS: { label: string; value: AnalysisMode }[] = [
   { label: '按当前计划', value: 'current_plan' },
   { label: '到账延迟', value: 'delayed' },
   { label: '共同约束', value: 'joint' },
 ];
+
+/** 「今日决策」页默认的到账延迟天数（与后端 window-summary 默认值一致）。 */
+const DEFAULT_DELAY_DAYS = 2;
 
 interface HeroProps {
   result: AnalysisResult;
@@ -68,14 +76,7 @@ interface HeroProps {
 
 function HeroAmount({ result, onOpenReason, onOpenShare, onGoToEvents }: HeroProps) {
   const copy = decisionCopy(result.status);
-  const amountCents =
-    copy.amountKind === 'withdrawable'
-      ? result.max_withdrawable_cents
-      : copy.amountKind === 'payment_gap'
-        ? result.payment_gap_cents
-        : copy.amountKind === 'buffer_gap'
-          ? result.buffer_gap_cents
-          : null;
+  const amountCents = decisionAmountCents(result);
 
   const parts = splitCny(amountCents ?? 0);
   const isZero = amountCents === 0;
@@ -155,6 +156,9 @@ export default function TodayPage() {
   const isMobile = useIsMobile();
   const { message } = AntdApp.useApp();
   const [mode, setMode] = useState<AnalysisMode>('current_plan');
+  // 到账延迟天数与本页口径同源：Hero、顶部图表、资金规划、延期压力全部用它，
+  // 避免出现「页头按延迟 2 天、下面按延迟 3 天」这种自相矛盾。
+  const [delayDays, setDelayDays] = useState(DEFAULT_DELAY_DAYS);
   const [reasonOpen, setReasonOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [snapshotOpen, setSnapshotOpen] = useState(false);
@@ -171,8 +175,9 @@ export default function TodayPage() {
   });
 
   const analysisQuery = useQuery({
-    queryKey: [...queryKeys.todayAnalysis, mode],
-    queryFn: () => analysisApi.run({ mode } satisfies AnalysisRunPayload),
+    queryKey: [...queryKeys.todayAnalysis, mode, delayDays],
+    queryFn: () =>
+      analysisApi.run({ mode, delay_days: delayDays } satisfies AnalysisRunPayload),
   });
 
   const limitEventQuery = useQuery({
@@ -218,7 +223,7 @@ export default function TodayPage() {
 
       {/* 图表化分析：每日收支与待结算到账分布 */}
       <Suspense fallback={<ChartLoading height={520} />}>
-        <AnalysisChartsPanelLazy analysis={result} compact />
+        <AnalysisChartsPanelLazy analysis={result} mode={mode} delayDays={delayDays} compact />
       </Suspense>
     </>
   ) : null;
@@ -447,8 +452,14 @@ export default function TodayPage() {
 
           {isMobile ? moneyCharts : null}
 
-          {/* 资金安排参考：结算延期压力 / 未来 7 天日常收付参考 / 建议经营留底 */}
-          <EnhancementPanel />
+          {/* 资金安排参考：结算延期压力 / 未来 7 天日常收付参考 / 建议经营留底。
+              顶部「资金规划」读的是本页当前口径的结果，不能读增强模块的 baseline。 */}
+          <EnhancementPanel
+            selectedAnalysis={result}
+            selectedMode={mode}
+            delayDays={delayDays}
+            onDelayDaysChange={setDelayDays}
+          />
 
           <AiExplainPanel result={result} />
         </>

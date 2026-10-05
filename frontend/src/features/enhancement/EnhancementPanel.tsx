@@ -6,6 +6,9 @@
  * * 历史参考（预测）明确声明「不计入今天可提用金额」
  * * 不可行状态下绝不出现「资金安排可行」这类结论
  * * 留底确认只在用户点击事件中执行，页面加载与数据刷新都不会自动提交
+ * * 顶部「资金规划」只反映**本页当前口径**的结果：它由页面传入，
+ *   不再拿增强接口的 baseline 冒充「当前结论」（baseline 是「按当前计划」的基准，
+ *   用户切到「到账延迟 / 共同约束」时两者并不相同）
  */
 
 import { useState } from 'react';
@@ -31,13 +34,56 @@ import { errorMessage } from '@/api/client';
 import { queryKeys, queryClient } from '@/api/queryClient';
 import { InlineNote, MetricCard, SectionCard, StatusTag } from '@/components/ui';
 import { formatCny, formatSigned } from '@/utils/money';
-import { STATUS_TONE, decisionCopy } from '@/utils/labels';
-import type { AnalysisStatus } from '@/types';
+import { STATUS_TONE, decisionAmountCents, decisionCopy } from '@/utils/labels';
+import type { AnalysisMode, AnalysisResult, AnalysisStatus } from '@/types';
 
 const DELAY_OPTIONS = [0, 1, 2, 3, 4, 7];
 
+/** 当前口径的中文说法：与页面顶部的模式选择器一一对应。 */
+const MODE_LABELS: Record<AnalysisMode, string> = {
+  current_plan: '按当前计划',
+  delayed: '到账延迟',
+  joint: '共同约束',
+  scenarios: '自定义情景',
+};
+
+/**
+ * 顶部「资金规划」的当前结论。
+ *
+ * 数据全部来自页面当前口径的 `selectedAnalysis`（与 Hero 同一份），
+ * 不再读增强接口的 baseline —— baseline 永远是「按当前计划」，
+ * 用户切到「到账延迟 / 共同约束」时读它就会与顶部结论矛盾。
+ */
+function CurrentPlanBlock({
+  analysis,
+  mode,
+}: {
+  analysis?: AnalysisResult;
+  mode: AnalysisMode;
+}) {
+  if (!analysis) {
+    return <Skeleton active paragraph={{ rows: 2 }} />;
+  }
+
+  const copy = decisionCopy(analysis.status);
+  const amount = decisionAmountCents(analysis);
+
+  return (
+    <div className="gew-stack">
+      <InlineNote tone={copy.negative ? 'warning' : 'info'}>
+        {MODE_LABELS[mode] ?? mode}：{copy.headline}
+        {amount !== null ? ` ${formatCny(amount)}` : ''}（状态：{analysis.status_label}）
+      </InlineNote>
+      {mode === 'joint' && analysis.binding_label ? (
+        <InlineNote tone="neutral">最保守情况：{analysis.binding_label}</InlineNote>
+      ) : null}
+    </div>
+  );
+}
+
 /** 结算延期压力：让用户直接选「晚几天」，而不是看模型名。 */
 function SettlementPressureBlock({ data }: { data: EnhancementOverview['settlement_pressure'] }) {
+
   if (!data.available) {
     return (
       <Empty
@@ -373,9 +419,19 @@ function ReserveBlock({
   );
 }
 
-export default function EnhancementPanel() {
-  const [delayDays, setDelayDays] = useState(2);
-
+export default function EnhancementPanel({
+  selectedAnalysis,
+  selectedMode = 'current_plan',
+  delayDays = 2,
+  onDelayDaysChange,
+}: {
+  /** 本页当前口径的分析结果（与顶部 Hero 是同一份数据） */
+  selectedAnalysis?: AnalysisResult;
+  selectedMode?: AnalysisMode;
+  /** 到账延迟天数：由页面持有，延期压力分析与页面口径共用同一个值 */
+  delayDays?: number;
+  onDelayDaysChange?: (value: number) => void;
+}) {
   const overviewQuery = useQuery({
     queryKey: queryKeys.enhancementOverview({ delay_days: delayDays }),
     queryFn: () => enhancementApi.overview({ delay_days: delayDays }),
@@ -416,7 +472,6 @@ export default function EnhancementPanel() {
   }
 
   const data = overviewQuery.data;
-  const copy = decisionCopy(data.baseline.status as AnalysisStatus);
 
   return (
     <div className="gew-stack">
@@ -435,15 +490,7 @@ export default function EnhancementPanel() {
           </Space>
         }
       >
-        <div>
-          <InlineNote tone={copy.negative ? 'warning' : 'info'}>
-            当前结论：{copy.headline}
-            {data.baseline.max_withdrawable_cents !== null
-              ? ` ${formatCny(data.baseline.max_withdrawable_cents)}`
-              : ''}
-            （状态：{data.baseline.status_label}）
-          </InlineNote>
-        </div>
+        <CurrentPlanBlock analysis={selectedAnalysis} mode={selectedMode} />
       </SectionCard>
 
       <SectionCard
@@ -452,7 +499,7 @@ export default function EnhancementPanel() {
           <Segmented
             size="small"
             value={delayDays}
-            onChange={(value) => setDelayDays(Number(value))}
+            onChange={(value) => onDelayDaysChange?.(Number(value))}
             options={DELAY_OPTIONS.map((value) => ({
               label: value === 0 ? '不延迟' : `${value} 天`,
               value,

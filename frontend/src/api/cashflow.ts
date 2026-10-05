@@ -71,9 +71,21 @@ export const analysisApi = {
   run: (payload: AnalysisRunPayload) => post<AnalysisResult>('/analysis/run', payload),
   stale: () => get<StaleStatus>('/analysis/stale'),
   history: (limit = 20) => get<Record<string, unknown>[]>('/analysis/history', { params: { limit } }),
-  /** 未来 7 天窗口聚合，供各图表使用 */
-  windowSummary: (params: { buffer_cents?: number; reference_at?: string } = {}) =>
-    get<WindowSummary>('/analysis/window-summary', { params }),
+  /**
+   * 未来 7 天窗口聚合，供各图表使用。
+   *
+   * **必须带上当前口径**：不带 `mode` 时后端按「按当前计划」聚合，
+   * 页面切到「到账延迟 / 共同约束」后图表就会与顶部结论矛盾。
+   */
+  windowSummary: (
+    params: {
+      mode?: AnalysisMode;
+      delay_days?: number;
+      scenario_ids?: string[] | null;
+      buffer_cents?: number;
+      reference_at?: string;
+    } = {},
+  ) => get<WindowSummary>('/analysis/window-summary', { params }),
 };
 
 export const scenarioApi = {

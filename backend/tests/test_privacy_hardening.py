@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -192,22 +194,32 @@ class TestHouseholdShareWhitelist:
         assert "已确认退款" not in body["title"]
         assert "event_title" not in body["payload"]
 
-    def test_revision_summary_does_not_carry_event_detail(self, household_fixture):
-        """变更摘要只表示「有一笔事项变更过」，不带出事项名称 / 金额 / 版本。
+    def test_revision_summary_is_not_shared_unless_selected(self, household_fixture):
+        """未勾选「事项变更摘要」时，事项的名称 / 金额 / 时间一个都不能出现。
 
-        这些属于事项细节，只允许通过「关键经营付款」明确勾选后出现。
+        这里刻意先对事项做一次**真实更正**：即使它确实有版本记录，
+        没有勾选也不允许把任何事项细节带进 payload 或响应文本。
         """
-        merchant, _, household, _, event_ids = household_fixture
+        merchant, member, household, _, event_ids = household_fixture
+        event_id = event_ids["API-REFUND-0001"]
+        corrected = merchant.patch(
+            f"/api/v1/cash-events/{event_id}",
+            json={"amount_cents": 70_000, "change_reason": "按实际单据修正"},
+        )
+        assert corrected.status_code == 200, corrected.text
+
         card = merchant.post(
             "/api/v1/household-cards",
             json={
                 "card_type": "revision",
-                "shared_fields": ["revision_summary"],
-                "cash_event_id": event_ids["API-REFUND-0001"],
+                "shared_fields": ["risk_summary"],
+                "cash_event_id": event_id,
             },
         )
         assert card.status_code == 201, card.text
-        payload = card.json()["payload"]
+        body = card.json()
+        payload = body["payload"]
+        assert "revision_summary" not in payload
         for leaked in (
             "event_title",
             "event_amount_cents",
@@ -215,6 +227,79 @@ class TestHouseholdShareWhitelist:
             "event_version",
         ):
             assert leaked not in payload, leaked
+        # 事项名称与金额也不能从标题 / 摘要等其它位置漏出去
+        assert body["title"] == "事项变更通知"
+        assert "已确认退款" not in card.text
+        assert "700.00" not in card.text
+        assert member.get(f"/api/v1/household-cards/{body['id']}").json()["payload"] == payload
+
+    def test_revision_summary_does_not_carry_event_detail(self, household_fixture):
+        """变更摘要只带**该事项自身**的「改前 → 改后」，不带出任何其它内容。
+
+        事项金额 / 时间 / 版本仍属于事项细节，只允许通过「关键经营付款」明确勾选后
+        作为顶层字段出现；摘要里的差异属于这次更正本身，且不得顺带带出账户余额、
+        其它事项或完整流水。
+        """
+        merchant, member, household, _, event_ids = household_fixture
+        event_id = event_ids["API-REFUND-0001"]
+        corrected = merchant.patch(
+            f"/api/v1/cash-events/{event_id}",
+            json={"amount_cents": 70_000, "change_reason": "product-data: 按实际单据修正"},
+        )
+        assert corrected.status_code == 200, corrected.text
+
+        card = merchant.post(
+            "/api/v1/household-cards",
+            json={
+                "card_type": "revision",
+                "shared_fields": ["revision_summary"],
+                "cash_event_id": event_id,
+            },
+        )
+        assert card.status_code == 201, card.text
+        payload = card.json()["payload"]
+
+        # 顶层事项字段仍然只在勾选「关键经营付款」时出现
+        for leaked in (
+            "event_title",
+            "event_amount_cents",
+            "event_scheduled_at",
+            "event_version",
+        ):
+            assert leaked not in payload, leaked
+        assert set(payload) == {"revision_summary"}
+
+        summary = payload["revision_summary"]
+        assert summary["event_title"] == "已确认退款"
+        assert summary["version"] == 2
+        assert summary["change_reason"] == "product-data: 按实际单据修正"
+        amount = next(item for item in summary["changes"] if item["field"] == "amount_cents")
+        assert amount["label"] == "金额"
+        assert amount["before"] == 60_000
+        assert amount["after"] == 70_000
+        assert amount["before_text"] == "¥600.00"
+        assert amount["after_text"] == "¥700.00"
+
+        # 余额、缺口、其它事项、完整流水一律不得出现
+        text = json.dumps(payload, ensure_ascii=False)
+        for forbidden in (
+            "进货款",
+            "房租",
+            "结算款",
+            "opening_balance",
+            "limiting_balance",
+            "end_balance",
+            "payment_gap",
+            "buffer_gap",
+            "max_withdrawable",
+            "key_payments",
+        ):
+            assert forbidden not in text, forbidden
+
+        # 接收端（家庭成员）读到的是同一份持久化摘要
+        received = member.get(f"/api/v1/household-cards/{card.json()['id']}")
+        assert received.status_code == 200, received.text
+        assert received.json()["payload"]["revision_summary"] == summary
 
     def test_key_payments_is_the_only_gate_for_event_detail(self, household_fixture):
         """勾选「关键经营付款」后，事项级字段才允许出现。"""

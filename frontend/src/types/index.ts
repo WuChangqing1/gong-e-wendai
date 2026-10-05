@@ -318,6 +318,13 @@ export interface ArrivalTerm {
 }
 
 export interface WindowSummary {
+  /** 本次聚合使用的口径，与顶部结论同一个来源 */
+  mode: AnalysisMode;
+  delay_days: number;
+  status: AnalysisStatus | null;
+  status_label: string | null;
+  binding_scenario_index: number | null;
+  binding_label: string | null;
   window_start: string;
   window_end: string;
   window_days: number;

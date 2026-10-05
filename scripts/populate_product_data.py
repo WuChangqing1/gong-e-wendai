@@ -15,6 +15,19 @@
 * 数据来源内部可识别：``cash_key``、``source_ref`` 与来源 ``raw_content``
   都带统一前缀；这些内部标识不出现在普通产品页面上。
 
+两个阶段
+--------
+* ``ensure``：只补缺失的对象。数量够了并不代表内容正确，因此所有检查都按
+  **语义 Spec**（标题 / 问题文案 / 编号前缀）逐条比对，而不是 ``count < N`` 就跳过。
+* ``repair``（:func:`repair_product_data`）：修正**已经存在但内容错误**的预置对象，
+  覆盖咨询关联与结论、更正卡关联与 payload、结算渠道、风险卡内容。
+  修复范围严格限定在本脚本自己产生的数据（见「识别依据」一节），
+  并保留已读状态、表态、评论、``created_at`` 与咨询时间线。
+
+关联关系全部是**语义绑定**：咨询与更正卡都按事项标题精确查找预置事项
+（``resolve_event_by_title``），找不到就报错停止 —— 绝不退回
+``events[index % len(events)]`` 那种按列表位置关联的做法。
+
 用法::
 
     python scripts/populate_product_data.py --dry-run      # 只报告将做什么
@@ -74,6 +87,30 @@ HISTORY_SEED = 20261003
 
 #: 结算记录：17 completed + 3 open，与需求给定的延期序列一致
 SETTLEMENT_DELAY_SEQUENCE = (0, 0, 0, 1, 0, 1, 0, 2, 1, 0, 0, 1, 2, 0, 1, 0, 2)
+
+#: 结算渠道唯一 canonical 值。
+#: 延期压力按渠道统计时用的渠道名就是结算类 ``CashEvent.source_label``
+#: （见 ``EnhancementService._channel_of``）；结算款事项的来源说明是「平台结算单」，
+#: 因此 SettlementRecord.channel 必须与它逐字一致，否则会出现
+#: 「该渠道已完成 0 笔」的假象。
+SETTLEMENT_CHANNEL = "平台结算单"
+#: 本脚本历史上写入过的错误渠道值：只在确认记录来自本脚本时才修正。
+LEGACY_SETTLEMENT_CHANNELS = ("平台结算",)
+#: 本脚本预置结算记录的编号 / 来源前缀（识别依据，绝不触碰用户真实导入的渠道数据）
+SETTLEMENT_KEY_PREFIX = f"{SOURCE_PREFIX.upper()}-STL-"
+SETTLEMENT_SOURCE_PREFIX = f"{SOURCE_PREFIX}:settlement"
+
+#: 咨询结论允许回写的字段：与 ``ConsultationService._resolution_to_event_fields``
+#: 的白名单严格一致。系统无法回写的内部字段（例如 ``settlement_status``）
+#: 绝不允许写进 ``resolution_fields``。
+RESOLUTION_FIELD_WHITELIST = (
+    "amount_cents",
+    "scheduled_at",
+    "state",
+    "title",
+    "note",
+    "source_label",
+)
 
 
 @dataclass
@@ -374,6 +411,31 @@ EXTRA_EVENTS: tuple[EventSpec, ...] = (
     ),
 )
 
+#: 全部预置事项（按标题索引）：咨询与更正卡都靠**标题精确匹配**关联事项。
+ALL_EVENT_SPECS: tuple[EventSpec, ...] = (*CORE_EVENTS, *EXTRA_EVENTS)
+
+EVENT_SPECS_BY_TITLE: dict[str, EventSpec] = {}
+for _spec in ALL_EVENT_SPECS:
+    if _spec.title in EVENT_SPECS_BY_TITLE:  # pragma: no cover - 定义期自检
+        raise RuntimeError(f"预置事项标题重复，语义绑定无法唯一确定：{_spec.title}")
+    EVENT_SPECS_BY_TITLE[_spec.title] = _spec
+del _spec
+
+
+def require_event_spec(title: str) -> EventSpec:
+    """按标题精确取预置事项定义。
+
+    找不到就**直接报错停止**：绝不退回 ``events[index % len(events)]``
+    这种按列表位置关联的做法（那正是「问的是结算款、关联的却是采购」的根因）。
+    """
+    spec = EVENT_SPECS_BY_TITLE.get(title)
+    if spec is None:
+        raise RuntimeError(
+            f"声明的关联事项标题不存在：{title!r}；"
+            f"可选标题：{'、'.join(EVENT_SPECS_BY_TITLE)}"
+        )
+    return spec
+
 
 #: 事项版本历史：先改到历史值，再改回标准当前数据。
 #: 通过 EventService.update_event 产生真实 CashEventRevision，不伪造 JSON。
@@ -384,6 +446,12 @@ REVISION_PLAN: dict[str, tuple[dict, dict]] = {
     "鲜食原料采购": (
         {"amount_cents": 1300_00},
         {"amount_cents": 1400_00},
+    ),
+    "平台结算款": (
+        # 历史值：预计到账 D3 09:00；复核后回到确认值 D2 09:00。
+        # 「结算到账日期修正」卡依赖这段真实版本历史。
+        {"offset_days": 3},
+        {"offset_days": 2},
     ),
     "门店租金": (
         {"note": "按租赁合同约定"},
@@ -400,19 +468,56 @@ REVISION_PLAN: dict[str, tuple[dict, dict]] = {
 }
 
 
-def build_plan(profile, *, reference_at: datetime, dry_run: bool) -> Plan:
-    """根据当前库内状态推导出需要执行的动作（幂等：只补缺失的部分）。"""
+# ---------------------------------------------------------------------------
+# 分析口径：风险卡必须挂真实分析结果，不允许伪造状态或金额
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class AnalysisSpec:
+    key: str
+    mode: str
+    delay_days: int
+    detail: str
+
+
+#: 生成顺序即「新鲜度」顺序：最后一条是商户熟悉的「按当前计划」，
+#: 于是最新一次分析结果不会被风险口径顶掉。
+ANALYSIS_SPECS: tuple[AnalysisSpec, ...] = (
+    AnalysisSpec(key="settlement_delay", mode="delayed", delay_days=2, detail="到账延迟 2 天"),
+    AnalysisSpec(key="below_buffer", mode="delayed", delay_days=1, detail="到账延迟 1 天"),
+    AnalysisSpec(key="current_plan", mode="current_plan", delay_days=0, detail="按当前计划"),
+)
+
+ANALYSIS_SPECS_BY_KEY: dict[str, AnalysisSpec] = {spec.key: spec for spec in ANALYSIS_SPECS}
+
+#: 风险卡要求的真实分析状态。引擎产不出该状态时**不伪造**，
+#: 改用与实际 payload 相符的普通资金提醒标题。
+RISK_TITLE_BY_STATUS = {
+    "FEASIBLE": "资金安排提醒",
+    "BELOW_BUFFER": "经营留底提醒",
+    "PAYMENT_GAP": "资金缺口提醒",
+    "INPUT_INCOMPLETE": "资金信息待补充",
+}
+
+
+def build_plan(profile, *, merchant, reference_at: datetime, dry_run: bool) -> Plan:
+    """根据当前库内状态推导出需要执行的动作。
+
+    分两部分，且**幂等**：
+
+    * ``ensure``：只补缺失的对象（绝不因为「数量够了」就跳过内容校验）；
+    * ``repair``：只修**明确属于本脚本预置数据集**、且与 Spec 不一致的对象。
+
+    dry-run 和 apply 共用本函数，保证「计划里写什么」与「实际做什么」一致。
+    """
 
     from sqlalchemy import select
 
     from app.models.cash import CashEvent
-    from app.models.consultation import ConsultationCase
     from app.models.enhancement import (
         DailyCashHistory,
         ReserveAdviceConfirmation,
-        SettlementRecord,
     )
-    from app.models.household import Household, HouseholdCard
+    from app.models.household import Household
     from app.models.merchant import BusinessAccountSnapshot
 
     plan = Plan()
@@ -466,7 +571,7 @@ def build_plan(profile, *, reference_at: datetime, dry_run: bool) -> Plan:
         plan.add("rename_legacy_key", f"旧初始化事项改编号 {old_key} → {new_key}")
 
     # --- 未来事项 ---
-    for spec in (*CORE_EVENTS, *EXTRA_EVENTS):
+    for spec in ALL_EVENT_SPECS:
         day = local_day(reference_at, spec.offset_days)
         key = cash_key_for(spec.kind, day, _index_of(spec))
         row = existing_keys.get(key)
@@ -478,7 +583,7 @@ def build_plan(profile, *, reference_at: datetime, dry_run: bool) -> Plan:
     # --- 事项版本历史 ---
     # 只统计**确实有计划**的事项：否则会把 SET-* / SLS-* 这些本就不该有修订记录的
     # 事项也报成「将生成版本历史」，dry-run 与实际执行不一致。
-    for spec in (*CORE_EVENTS, *EXTRA_EVENTS):
+    for spec in ALL_EVENT_SPECS:
         if spec.title not in REVISION_PLAN:
             continue
         day = local_day(reference_at, spec.offset_days)
@@ -488,10 +593,6 @@ def build_plan(profile, *, reference_at: datetime, dry_run: bool) -> Plan:
             plan.add("revision", f"为 {key}（{spec.title}）生成版本历史")
 
     # --- 历史经营数据 ---
-    history_days = db.scalar(
-        select(DailyCashHistory.day).where(DailyCashHistory.merchant_id == profile.id)
-    )
-    _ = history_days
     existing_history = len(
         db.scalars(
             select(DailyCashHistory.id).where(DailyCashHistory.merchant_id == profile.id)
@@ -505,17 +606,18 @@ def build_plan(profile, *, reference_at: datetime, dry_run: bool) -> Plan:
         )
 
     # --- 结算记录 ---
-    existing_settlements = len(
-        db.scalars(
-            select(SettlementRecord.id).where(SettlementRecord.merchant_id == profile.id)
-        ).all()
-    )
-    expected_settlements = len(SETTLEMENT_DELAY_SEQUENCE) + 3
-    if existing_settlements < expected_settlements:
+    # 按**编号**逐条判断，而不是「总数够了就跳过」：经营者自己导入的结算记录
+    # 不应该被算成预置数据，从而把预置记录挤掉。
+    existing_keys_set = {row.external_key for row in script_settlements(db, profile)}
+    missing_settlements = [
+        key for key in expected_settlement_keys(reference_at) if key not in existing_keys_set
+    ]
+    if missing_settlements:
         plan.add(
             "settlement",
-            f"补齐结算记录至 {expected_settlements} 条（现有 {existing_settlements} 条）",
-            count=expected_settlements - existing_settlements,
+            f"补齐结算记录 {len(missing_settlements)} 条"
+            f"（渠道统一为「{SETTLEMENT_CHANNEL}」）",
+            count=len(missing_settlements),
         )
 
     # --- 家庭与邀请码 ---
@@ -527,26 +629,56 @@ def build_plan(profile, *, reference_at: datetime, dry_run: bool) -> Plan:
     elif is_demo_key(household.invite_code):
         plan.add("rotate_invite_code", "旧演示邀请码更新为随机邀请码")
 
+    # --- 分析结果（风险卡必须挂真实分析） ---
+    for spec in ANALYSIS_SPECS:
+        if find_matching_analysis(db, profile, spec, reference_at) is None:
+            plan.add("analysis", f"生成分析结果（{spec.detail}）")
+
     # --- 家庭协同卡与评论 ---
-    existing_cards = len(
-        db.scalars(
-            select(HouseholdCard.id).where(HouseholdCard.merchant_id == profile.id)
-        ).all()
-    )
-    if existing_cards < 8:
-        plan.add("household_card", f"补建家庭协同卡至 8 张（现有 {existing_cards} 张）")
+    existing_cards = _script_cards(db, profile, merchant)
+    for spec in CARD_SPECS:
+        if not any(
+            (spec.card_type, title) in existing_cards for title in card_title_candidates(spec)
+        ):
+            link = f"，关联 {spec.event_title}" if spec.event_title else ""
+            plan.add("household_card", f"补建协同卡「{spec.title}」（{spec.card_type}）{link}")
 
     # --- 经营咨询 ---
-    existing_cases = len(
-        db.scalars(
-            select(ConsultationCase.id).where(ConsultationCase.merchant_id == profile.id)
-        ).all()
-    )
-    if existing_cases < 8:
-        plan.add("consultation", f"补建经营咨询至 8 条（现有 {existing_cases} 条）")
+    existing_cases = _script_cases(db, profile, merchant)
+    for spec in CONSULTATION_SPECS:
+        if spec.question not in existing_cases:
+            plan.add(
+                "consultation",
+                f"补建咨询「{spec.title}」（关联 {spec.event_title} / {spec.target_status}）",
+            )
+
+    # --- 修复阶段：只针对已存在的预置对象 ---
+    for case, issues in consultation_repairs(db, profile, merchant, reference_at):
+        plan.add("repair_consultation", f"{case.case_no}「{case.question[:16]}…」：{'、'.join(issues)}")
+    for card, issues in card_repairs(db, profile, merchant, reference_at):
+        plan.add("repair_card", f"{card.card_type}「{card.title}」：{'、'.join(issues)}")
+    for row in settlement_channel_repairs(db, profile):
+        legacy = "（已知旧值）" if row.channel in LEGACY_SETTLEMENT_CHANNELS else ""
+        plan.add(
+            "repair_settlement_channel",
+            f"结算记录 {row.external_key} 渠道 {row.channel} → {SETTLEMENT_CHANNEL}{legacy}",
+        )
 
     _ = dry_run
     return plan
+
+
+def expected_settlement_keys(reference_at: datetime) -> list[str]:
+    """本脚本应当存在的结算记录编号（与写入逻辑共用同一套推导）。"""
+    keys: list[str] = []
+    total = len(SETTLEMENT_DELAY_SEQUENCE)
+    for index in range(1, total + 1):
+        day = local_day(reference_at, -(total - index + 20))
+        keys.append(f"{SETTLEMENT_KEY_PREFIX}{day.strftime('%Y%m%d')}-{index:03d}")
+    for index in range(3):
+        day = local_day(reference_at, -(3 - index))
+        keys.append(f"{SETTLEMENT_KEY_PREFIX}OPEN-{day.strftime('%Y%m%d')}")
+    return keys
 
 
 def _index_of(spec: EventSpec) -> int:
@@ -589,6 +721,246 @@ def legacy_renames(db, profile, reference_at: datetime) -> list[tuple[object, st
             taken.add(new_key)
             pairs.append((row, row.cash_key, new_key))
     return pairs
+
+
+# ---------------------------------------------------------------------------
+# 语义绑定与「属于本脚本预置数据集」的识别依据
+#
+# 判断依据全部是**语义**的（来源原文前缀 / 标题 / 问题文案 / 创建人 / 编号前缀），
+# 不依赖任何硬编码日期（例如 20261004），因此新环境靠 Spec 就能建立与修复。
+# ---------------------------------------------------------------------------
+
+
+def is_product_data_event(row) -> bool:  # noqa: ANN001
+    """事项是否由本脚本预置：来源原文首行带统一前缀。"""
+    record = getattr(row, "source_record", None)
+    raw = getattr(record, "raw_content", None) if record is not None else None
+    return (raw or "").splitlines()[:1] == [SOURCE_PREFIX]
+
+
+def _try_resolve_event(db, profile, title: str, reference_at: datetime):  # noqa: ANN001
+    """按标题取本脚本预置的事项；不存在返回 ``None``（修复阶段需要它做探测）。"""
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from app.models.cash import CashEvent  # noqa: PLC0415
+
+    spec = require_event_spec(title)
+    rows = [
+        row
+        for row in db.scalars(
+            select(CashEvent).where(
+                CashEvent.merchant_id == profile.id, CashEvent.title == title
+            )
+        ).all()
+        if row.state != "cancelled" and is_product_data_event(row)
+    ]
+    if not rows:
+        return None
+    expected_key = event_key(spec, reference_at)
+    rows.sort(key=lambda row: (row.cash_key != expected_key, row.scheduled_at, row.cash_key))
+    return rows[0]
+
+
+def resolve_event_by_title(db, profile, title: str, reference_at: datetime):  # noqa: ANN001
+    """按标题取本脚本预置的事项；不存在就报错停止。
+
+    同标题可能被经营者自己录过一笔，因此只接受来源原文带预置前缀的记录；
+    若同时存在多笔（例如曾被取消后以 ``-R`` 重建），优先取本次期初时点推导出的编号。
+    """
+    row = _try_resolve_event(db, profile, title, reference_at)
+    if row is None:
+        raise RuntimeError(
+            f"预置事项缺失：{title!r}（请先执行 ensure 阶段建设事项，再执行修复）"
+        )
+    return row
+
+
+def _script_cases(db, profile, merchant) -> dict[str, object]:  # noqa: ANN001
+    """本脚本预置的经营咨询：``{问题文案: case}``。
+
+    识别依据（全部命中才算）：咨询编号形如 ``ZX`` 前缀 + 属于该经营主体 +
+    创建人是该经营者 + 问题文案与 :data:`CONSULTATION_SPECS` 逐字一致。
+    """
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from app.models.consultation import ConsultationCase  # noqa: PLC0415
+
+    known = {spec.question for spec in CONSULTATION_SPECS}
+    found: dict[str, object] = {}
+    for row in db.scalars(
+        select(ConsultationCase).where(ConsultationCase.merchant_id == profile.id)
+    ).all():
+        if row.created_by != merchant.id:
+            continue
+        if not (row.case_no or "").startswith("ZX"):
+            continue
+        if row.question in known and row.question not in found:
+            found[row.question] = row
+    return found
+
+
+def card_title_candidates(spec: CardSpec) -> tuple[str, ...]:
+    """卡片识别标题：预置标题 + 状态不符时可能退化的普通提醒标题。
+
+    识别时把所有可能的退化标题都算进来，避免「标题被改过就找不到卡片、
+    于是又新建一张」的重复建设。
+    """
+    if spec.required_status is None:
+        return (spec.title,)
+    return (spec.title, *RISK_TITLE_BY_STATUS.values())
+
+
+def _script_cards(db, profile, merchant) -> dict[tuple[str, str], object]:  # noqa: ANN001
+    """本脚本预置的协同卡：``{(card_type, 标题): card}``。
+
+    只接受「创建人是该经营者 + 标题命中预置标题（含退化标题）」的卡片。
+    """
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from app.models.household import HouseholdCard  # noqa: PLC0415
+
+    known: set[tuple[str, str]] = set()
+    for spec in CARD_SPECS:
+        for title in card_title_candidates(spec):
+            known.add((spec.card_type, title))
+
+    found: dict[tuple[str, str], object] = {}
+    for row in db.scalars(
+        select(HouseholdCard).where(HouseholdCard.merchant_id == profile.id)
+    ).all():
+        if row.created_by != merchant.id:
+            continue
+        key = (row.card_type, row.title)
+        if key in known and key not in found:
+            found[key] = row
+    return found
+
+
+def script_settlements(db, profile) -> list[object]:  # noqa: ANN001
+    """本脚本预置的结算记录：编号或来源前缀命中统一前缀。"""
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from app.models.enhancement import SettlementRecord  # noqa: PLC0415
+
+    rows = db.scalars(
+        select(SettlementRecord).where(SettlementRecord.merchant_id == profile.id)
+    ).all()
+    return [
+        row
+        for row in rows
+        if (row.external_key or "").startswith(SETTLEMENT_KEY_PREFIX)
+        or (row.source_ref or "").startswith(SETTLEMENT_SOURCE_PREFIX)
+    ]
+
+
+def sanitise_resolution_fields(fields: dict | None) -> dict:
+    """按系统真正支持回写的字段白名单裁剪咨询结论字段。
+
+    声明了白名单之外的字段直接报错：宁可停止，也不写系统读不回来的内部字段
+    （例如 ``settlement_status``）。
+    """
+    cleaned: dict = {}
+    for key, value in (fields or {}).items():
+        if key not in RESOLUTION_FIELD_WHITELIST:
+            raise RuntimeError(
+                f"resolution_fields 含系统不支持回写的字段：{key!r}；"
+                f"允许：{'、'.join(RESOLUTION_FIELD_WHITELIST)}"
+            )
+        cleaned[key] = value
+    return cleaned
+
+
+# ---------------------------------------------------------------------------
+# 分析结果：风险卡必须挂真实分析，不允许伪造状态或金额
+# ---------------------------------------------------------------------------
+
+
+def analysis_signature(  # noqa: ANN001
+    db, profile, spec: AnalysisSpec, reference_at: datetime
+) -> tuple:
+    """本脚本口径下应有的分析签名。
+
+    用确定性引擎**重新计算**而不是读库标记，所以不依赖硬编码日期，
+    也能自动发现「账本已变化、旧结果不再成立」的情况。
+    """
+    from app.services.analysis_service import AnalysisService  # noqa: PLC0415
+    from app.services.cash_engine import events_version_hash, run_engine  # noqa: PLC0415
+
+    service = AnalysisService(db)
+    inputs = service.build_inputs(
+        profile, mode=spec.mode, delay_days=spec.delay_days, snapshot_at=reference_at
+    )
+    result = run_engine(inputs[0])
+    # 依据版本必须与 AnalysisService._version_hash 同源：它取**未平移**的原始事项，
+    # 而 delayed 口径下的 inputs[0].events 已经被推后过，不能拿来算指纹。
+    base_hash = events_version_hash(
+        [service.to_input(event) for event in service.load_events(profile.id)]
+    )
+    return (
+        str(result.status),
+        int(result.payment_gap_cents or 0),
+        int(result.buffer_gap_cents or 0),
+        result.max_withdrawable_cents,
+        base_hash,
+    )
+
+
+def find_matching_analysis(  # noqa: ANN001
+    db, profile, spec: AnalysisSpec, reference_at: datetime, *, exclude=()
+):
+    """找出与当前账本一致、且口径相同的既有分析结果（幂等复用的关键）。"""
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from app.models.cash import AnalysisResult  # noqa: PLC0415
+
+    expected = analysis_signature(db, profile, spec, reference_at)
+    rows = db.scalars(
+        select(AnalysisResult)
+        .where(AnalysisResult.merchant_id == profile.id)
+        .order_by(AnalysisResult.created_at.desc())
+    ).all()
+    for row in rows:
+        if row.id in exclude or str(row.mode) != spec.mode:
+            continue
+        actual = (
+            str(row.status),
+            int(row.payment_gap_cents or 0),
+            int(row.buffer_gap_cents or 0),
+            row.max_withdrawable_cents,
+            row.events_version_hash,
+        )
+        if actual == expected:
+            return row
+    return None
+
+
+def ensure_analyses(  # noqa: ANN001
+    db, profile, merchant, reference_at: datetime, *, verbose: bool = True
+) -> dict:
+    """按语义 Spec 真实生成分析结果；已存在的同签名结果直接复用（幂等）。"""
+    from app.models.cash import AnalysisResult  # noqa: PLC0415
+    from app.schemas.analysis import AnalysisRunRequest  # noqa: PLC0415
+    from app.services.analysis_service import AnalysisService  # noqa: PLC0415
+
+    resolved: dict = {}
+    used: set[str] = set()
+    for spec in ANALYSIS_SPECS:
+        row = find_matching_analysis(db, profile, spec, reference_at, exclude=used)
+        if row is None:
+            kwargs: dict = {"mode": spec.mode, "snapshot_at": reference_at}
+            if spec.mode == "delayed":
+                kwargs["delay_days"] = spec.delay_days
+            out = AnalysisService(db).run(
+                profile, AnalysisRunRequest(**kwargs), actor_id=merchant.id
+            )
+            row = db.get(AnalysisResult, out.id)
+            if verbose:
+                withdrawable = row.max_withdrawable_cents
+                amount = 0 if withdrawable is None else withdrawable // 100
+                print(f"  ✓ 分析结果（{spec.detail}）：{row.status}（可提用 {amount} 元）")
+        resolved[spec.key] = row
+        used.add(row.id)
+    return resolved
 
 
 # ---------------------------------------------------------------------------
@@ -840,11 +1212,11 @@ def apply_history_and_settlements(
             select(SettlementRecord).where(SettlementRecord.merchant_id == profile.id)
         ).all()
     }
-    channel = "平台结算"
+    channel = SETTLEMENT_CHANNEL
     created_settlements = 0
     for index, delay in enumerate(SETTLEMENT_DELAY_SEQUENCE, start=1):
         scheduled_day = local_day(reference_at, -(len(SETTLEMENT_DELAY_SEQUENCE) - index + 20))
-        external_key = f"{SOURCE_PREFIX.upper()}-STL-{scheduled_day.strftime('%Y%m%d')}-{index:03d}"
+        external_key = f"{SETTLEMENT_KEY_PREFIX}{scheduled_day.strftime('%Y%m%d')}-{index:03d}"
         if external_key in existing:
             continue
         scheduled_at = datetime.combine(
@@ -860,7 +1232,7 @@ def apply_history_and_settlements(
                 actual_at=actual_at,
                 known_at=actual_at,
                 status=SETTLEMENT_COMPLETED,
-                source_ref=f"{SOURCE_PREFIX}:settlement:{index}",
+                source_ref=f"{SETTLEMENT_SOURCE_PREFIX}:{index}",
                 note=f"{SOURCE_PREFIX}: 实际延期 {delay} 天",
                 created_by=merchant.id,
             )
@@ -868,7 +1240,7 @@ def apply_history_and_settlements(
         created_settlements += 1
     for index in range(3):
         scheduled_day = local_day(reference_at, -(3 - index))
-        external_key = f"{SOURCE_PREFIX.upper()}-STL-OPEN-{scheduled_day.strftime('%Y%m%d')}"
+        external_key = f"{SETTLEMENT_KEY_PREFIX}OPEN-{scheduled_day.strftime('%Y%m%d')}"
         if external_key in existing:
             continue
         db.add(
@@ -880,7 +1252,7 @@ def apply_history_and_settlements(
                 actual_at=None,
                 known_at=utcnow(),
                 status=SETTLEMENT_OPEN,
-                source_ref=f"{SOURCE_PREFIX}:settlement:open:{index}",
+                source_ref=f"{SETTLEMENT_SOURCE_PREFIX}:open:{index}",
                 note=f"{SOURCE_PREFIX}: 尚未到账",
                 created_by=merchant.id,
             )
@@ -907,6 +1279,14 @@ class CardSpec:
     reaction: str | None
     read: bool
     comments: tuple[str, ...] = ()
+    #: 关联事项标题：必须能在 CORE_EVENTS / EXTRA_EVENTS 里精确找到；
+    #: ``None`` 表示该卡不关联具体事项。
+    event_title: str | None = None
+    #: 该卡 payload 绑定的分析口径（见 ANALYSIS_SPECS）
+    analysis_key: str = "current_plan"
+    #: 风险卡要求的**真实**分析状态；引擎产不出该状态时不伪造，
+    #: 改用与实际 payload 相符的普通资金提醒标题（见 RISK_TITLE_BY_STATUS）。
+    required_status: str | None = None
 
 
 CARD_SPECS: tuple[CardSpec, ...] = (
@@ -966,6 +1346,10 @@ CARD_SPECS: tuple[CardSpec, ...] = (
         ),
         reaction=None,
         read=True,
+        # 挂真实「到账延迟 2 天」分析：只有它才会产出付款缺口，
+        # 标题与 payload 才自洽（不能拿「按当前计划」的分析冒充风险）。
+        analysis_key="settlement_delay",
+        required_status="PAYMENT_GAP",
     ),
     CardSpec(
         card_type="risk",
@@ -975,6 +1359,10 @@ CARD_SPECS: tuple[CardSpec, ...] = (
         shared_fields=("risk_summary", "buffer_gap", "limiting_balance"),
         reaction=None,
         read=False,
+        # 真实「到账延迟 1 天」分析：余额 400 元低于留底 600 元，
+        # 状态为 BELOW_BUFFER（付款缺口为 0），与标题一致。
+        analysis_key="below_buffer",
+        required_status="BELOW_BUFFER",
     ),
     CardSpec(
         card_type="revision",
@@ -984,6 +1372,8 @@ CARD_SPECS: tuple[CardSpec, ...] = (
         shared_fields=("revision_summary", "limiting_point"),
         reaction=None,
         read=True,
+        # 关联「平台结算款」：真实版本历史为 D3 09:00 → D2 09:00
+        event_title="平台结算款",
     ),
     CardSpec(
         card_type="revision",
@@ -993,6 +1383,8 @@ CARD_SPECS: tuple[CardSpec, ...] = (
         shared_fields=("revision_summary", "risk_summary"),
         reaction=None,
         read=False,
+        # 关联「鲜食原料采购」：真实版本历史为 ¥1,300 → ¥1,400
+        event_title="鲜食原料采购",
     ),
 )
 
@@ -1009,10 +1401,8 @@ def apply_household_data(
     """建立家庭协同历史：家庭、成员关系、8 张卡片、表态与评论。"""
     from sqlalchemy import select
 
-    from app.models.cash import AnalysisResult, CashEvent
     from app.models.household import (
         Household,
-        HouseholdCard,
         HouseholdCardComment,
         HouseholdCardRecipient,
         HouseholdMembership,
@@ -1062,45 +1452,36 @@ def apply_household_data(
         if verbose:
             print("  ✓ 家庭成员关系已建立（配偶 / active）")
 
-    existing_cards = len(
-        db.scalars(
-            select(HouseholdCard.id).where(HouseholdCard.merchant_id == profile.id)
-        ).all()
-    )
-    if existing_cards >= len(CARD_SPECS):
-        if verbose:
-            print(f"  · 协同卡已存在 {existing_cards} 张，跳过")
-        return
+    # 分析结果：风险卡与决策卡都必须挂**真实**分析，先按语义 Spec 备好。
+    analyses = ensure_analyses(db, profile, merchant, reference_at, verbose=verbose)
 
-    analysis = db.scalar(
-        select(AnalysisResult)
-        .where(AnalysisResult.merchant_id == profile.id, AnalysisResult.is_stale.is_(False))
-        .order_by(AnalysisResult.created_at.desc())
-        .limit(1)
-    )
-    events = db.scalars(
-        select(CashEvent)
-        .where(CashEvent.merchant_id == profile.id, CashEvent.state == "scheduled")
-        .order_by(CashEvent.scheduled_at)
-    ).all()
-    settlement_event = next((e for e in events if e.event_type == "settlement"), None)
-
+    existing = _script_cards(db, profile, merchant)
     created = 0
     for spec in CARD_SPECS:
-        cash_event_id = (
-            settlement_event.id
-            if spec.card_type == "revision" and settlement_event is not None
-            else None
-        )
+        if any((spec.card_type, title) in existing for title in card_title_candidates(spec)):
+            continue
+
+        analysis = analyses[spec.analysis_key]
+        cash_event_id = None
+        if spec.event_title is not None:
+            cash_event_id = resolve_event_by_title(
+                db, profile, spec.event_title, reference_at
+            ).id
+
+        # 状态不符时**不伪造**：改用与实际 payload 相符的普通资金提醒标题。
+        title = spec.title
+        if spec.required_status is not None and str(analysis.status) != spec.required_status:
+            title = RISK_TITLE_BY_STATUS.get(str(analysis.status), spec.title)
+
         card = service.create_card(
             profile,
             household,
             merchant,
             card_type=spec.card_type,
             shared_fields=list(spec.shared_fields),
-            title=spec.title,
+            title=title,
             summary=None,
-            analysis_result_id=analysis.id if analysis is not None else None,
+            analysis_result_id=analysis.id,
             cash_event_id=cash_event_id,
             planned_amount_cents=spec.planned_cents,
         )
@@ -1134,7 +1515,8 @@ def apply_household_data(
         db.commit()
         created += 1
         if verbose:
-            print(f"  ✓ 协同卡「{spec.title}」（{spec.card_type}）")
+            link = f" → {spec.event_title}" if spec.event_title else ""
+            print(f"  ✓ 协同卡「{title}」（{spec.card_type}）{link}")
 
     if verbose:
         print(f"  ✓ 协同卡合计新增 {created} 张，含表态与评论")
@@ -1144,15 +1526,98 @@ def apply_household_data(
 # 写入：经营咨询
 # ---------------------------------------------------------------------------
 #: 8 条咨询：2 submitted / 2 under_review / 1 need_more_information / 2 verified / 1 closed
-CONSULTATION_SPECS: tuple[tuple[str, str, str, str], ...] = (
-    ("平台结算到账时间核实", "settlement_time", "这笔平台结算款原定次日上午到账，账户还没有收到，想确认结算进度。", "submitted"),
-    ("外卖平台结算状态核对", "settlement_time", "外卖平台的结算款显示已结算，但账户未入账，想核对一下状态。", "submitted"),
-    ("顾客退款状态确认", "missing_arrival", "顾客取消订单后的退款已经提交，想确认是否已经完成。", "under_review"),
-    ("平台服务费扣款核对", "fee_unknown", "本笔结算的到账金额与结算单差额较大，想核对服务费扣款。", "under_review"),
-    ("团购结算批次查询", "settlement_time", "团购平台的结算批次编号与账单不一致，请协助查询。", "need_more_information"),
-    ("结算款预计到账时间确认", "settlement_time", "想确认这笔结算款预计到账的具体时间。", "verified"),
-    ("收款入账时间核对", "settlement_time", "门店收款已到账，但入账时间与记录不一致，请协助核对。", "verified"),
-    ("某笔经营事项补充材料", "other", "这笔支出缺少对应的采购单据，想补充材料。", "closed"),
+#:
+#: 每条咨询都用 :class:`ConsultationSpec` 做**语义绑定**：
+#: ``event_title`` 必须能在 CORE_EVENTS / EXTRA_EVENTS 里按标题精确找到，
+#: 找不到就报错停止 —— 绝不退回 ``events[index % len(events)]`` 那种按位置关联
+#: （那正是「问的是结算款、关联的却是包装耗材采购」的根因）。
+#:
+#: ``resolution_summary`` 按事项语义逐条撰写，不允许所有已核实/已完成共用一句；
+#: ``resolution_fields`` 只允许 :data:`RESOLUTION_FIELD_WHITELIST` 内的字段
+#: （纯核实的咨询留空即可，不强行造字段）。
+@dataclass(frozen=True)
+class ConsultationSpec:
+    title: str
+    event_title: str
+    question_type: str
+    question: str
+    target_status: str
+    resolution_summary: str | None = None
+    resolution_fields: dict | None = None
+    #: 状态流转到「待补充资料」时咨询人员发出的补充要求
+    info_request: str | None = None
+    #: 状态流转到「已完成」时的归档说明（会覆盖 resolution_summary）
+    close_summary: str | None = None
+
+
+CONSULTATION_SPECS: tuple[ConsultationSpec, ...] = (
+    ConsultationSpec(
+        title="平台结算到账时间核实",
+        event_title="平台结算款",
+        question_type="settlement_time",
+        question="这笔平台结算款原定次日上午到账，账户还没有收到，想确认结算进度。",
+        target_status="submitted",
+        resolution_summary="已核对该笔平台结算记录，当前结算状态正常。",
+    ),
+    ConsultationSpec(
+        title="外卖平台结算状态核对",
+        event_title="外卖平台结算",
+        question_type="settlement_time",
+        question="外卖平台的结算款显示已结算，但账户未入账，想核对一下状态。",
+        target_status="submitted",
+        resolution_summary="已核对外卖平台结算记录，当前结算状态正常。",
+    ),
+    ConsultationSpec(
+        title="顾客退款状态确认",
+        event_title="顾客退款",
+        question_type="missing_arrival",
+        question="顾客取消订单后的退款已经提交，想确认是否已经完成。",
+        target_status="under_review",
+        resolution_summary="已核对退款处理记录，退款状态已确认。",
+    ),
+    ConsultationSpec(
+        title="平台服务费扣款核对",
+        event_title="平台结算款",
+        question_type="fee_unknown",
+        question="本笔结算的到账金额与结算单差额较大，想核对服务费扣款。",
+        target_status="under_review",
+        resolution_summary="已核对平台服务费的扣款明细。",
+    ),
+    ConsultationSpec(
+        title="团购结算批次查询",
+        event_title="团购平台结算",
+        question_type="settlement_time",
+        question="团购平台的结算批次编号与账单不一致，请协助查询。",
+        target_status="need_more_information",
+        resolution_summary="已核对团购平台的结算批次记录。",
+        info_request="请提供该笔结算的结算单截图编号，便于核对。",
+    ),
+    ConsultationSpec(
+        title="结算款预计到账时间确认",
+        event_title="平台结算款",
+        question_type="settlement_time",
+        question="想确认这笔结算款预计到账的具体时间。",
+        target_status="verified",
+        resolution_summary="已核对该笔平台结算记录，当前结算状态正常。",
+    ),
+    ConsultationSpec(
+        title="收款入账时间核对",
+        event_title="门店销售收款",
+        question_type="settlement_time",
+        question="门店收款已到账，但入账时间与记录不一致，请协助核对。",
+        target_status="verified",
+        resolution_summary="已核对门店收款记录及入账时间。",
+    ),
+    ConsultationSpec(
+        title="经营事项补充材料",
+        event_title="包装耗材采购",
+        question_type="other",
+        question="这笔支出缺少对应的采购单据，想补充材料。",
+        target_status="closed",
+        resolution_summary="已收到并核对补充的采购材料。",
+        info_request="请补充该笔采购的供应商单据编号，便于核对。",
+        close_summary="已收到并核对补充的采购材料，该事项已完成归档。",
+    ),
 )
 
 
@@ -1162,70 +1627,300 @@ def apply_consultation_data(
     profile,
     merchant,
     consultant_user,
+    reference_at: datetime,
     verbose: bool = True,
 ) -> None:
     """建立经营咨询历史，覆盖全部状态并带完整时间线。"""
-    from sqlalchemy import select
-
-    from app.models.cash import CashEvent
-    from app.models.consultation import ConsultationCase
     from app.services.consultation_service import ConsultationService
 
-    existing = len(
-        db.scalars(
-            select(ConsultationCase.id).where(ConsultationCase.merchant_id == profile.id)
-        ).all()
-    )
-    if existing >= len(CONSULTATION_SPECS):
-        if verbose:
-            print(f"  · 咨询已存在 {existing} 条，跳过")
-        return
-
-    events = db.scalars(
-        select(CashEvent)
-        .where(CashEvent.merchant_id == profile.id, CashEvent.state == "scheduled")
-        .order_by(CashEvent.scheduled_at)
-    ).all()
-    if not events:
-        if verbose:
-            print("  · 没有可用事项，跳过咨询建设")
-        return
-
     service = ConsultationService(db)
+    existing = _script_cases(db, profile, merchant)
     created = 0
-    for index, (title, qtype, question, target) in enumerate(CONSULTATION_SPECS):
-        event = events[index % len(events)]
+    for spec in CONSULTATION_SPECS:
+        if spec.question in existing:
+            continue
+        # 语义绑定：按标题精确取事项；取不到直接报错停止
+        event = resolve_event_by_title(db, profile, spec.event_title, reference_at)
+        if event.event_type != require_event_spec(spec.event_title).kind:  # pragma: no cover
+            raise RuntimeError(f"事项类型与 Spec 不一致：{spec.event_title}")
+
         case = service.create_case(
             profile,
             merchant,
             cash_event_id=event.id,
-            question_type=qtype,
-            question=question,
+            question_type=spec.question_type,
+            question=spec.question,
             ai_draft=None,
             status="submitted",
         )
-        if target in ("under_review", "need_more_information", "verified", "closed"):
+        if spec.target_status in ("under_review", "need_more_information", "verified", "closed"):
             service.start_review(case, consultant_user)
-        if target == "need_more_information":
+        if spec.target_status == "need_more_information":
             service.request_information(
-                case, consultant_user, "请提供该笔结算的结算单截图编号，便于核对。"
+                case,
+                consultant_user,
+                spec.info_request or "请补充相关单据，便于核对。",
             )
-        if target in ("verified", "closed"):
+        if spec.target_status in ("verified", "closed"):
             service.verify(
                 case,
                 consultant_user,
-                resolution_summary=f"{title}：已核对平台流水，结算状态正常。",
-                resolution_fields={"settlement_status": "已核对"},
+                resolution_summary=spec.resolution_summary or "",
+                resolution_fields=sanitise_resolution_fields(spec.resolution_fields),
             )
-        if target == "closed":
-            service.close(case, consultant_user, f"{title}：已完成核对并归档。")
+        if spec.target_status == "closed":
+            service.close(
+                case,
+                consultant_user,
+                spec.close_summary or spec.resolution_summary or "事项已完成",
+            )
 
         created += 1
         if verbose:
-            print(f"  ✓ 咨询「{title}」→ {target}")
+            print(
+                f"  ✓ 咨询「{spec.title}」→ {spec.target_status}"
+                f"（关联事项：{event.title} / {event.event_type}）"
+            )
 
     if verbose:
         print(f"  ✓ 咨询合计新增 {created} 条，含完整处理时间线")
+
+
+# ---------------------------------------------------------------------------
+# 修复阶段：只修「明确属于本脚本预置数据集」且与 Spec 不一致的对象
+#
+# 识别依据（全部是语义的，不含硬编码日期）：
+#   * 事项：标题精确匹配 + 来源原文首行带 SOURCE_PREFIX
+#   * 咨询：编号 ZX 前缀 + merchant_id + created_by + 问题文案与 Spec 逐字一致
+#   * 卡片：merchant_id + created_by + 卡片类型 + 预置标题（含退化标题）
+#   * 结算：external_key / source_ref 前缀
+#
+# 探测函数与执行函数共用：dry-run 报告的就是真正会被修的。
+# ---------------------------------------------------------------------------
+def _consultation_spec_of(question: str) -> ConsultationSpec:
+    for spec in CONSULTATION_SPECS:
+        if spec.question == question:
+            return spec
+    raise RuntimeError(f"未登记的预置咨询文案：{question[:24]}")
+
+
+def _expected_resolution(spec: ConsultationSpec) -> str | None:
+    if spec.target_status == "closed":
+        return spec.close_summary or spec.resolution_summary
+    if spec.target_status == "verified":
+        return spec.resolution_summary
+    return None
+
+
+def consultation_repairs(  # noqa: ANN001
+    db, profile, merchant, reference_at: datetime
+) -> list[tuple]:
+    """返回 ``[(case, 待修复项), ...]``：只包含本脚本预置、且与 Spec 不一致的咨询。"""
+    result: list[tuple] = []
+    for question, case in _script_cases(db, profile, merchant).items():
+        spec = _consultation_spec_of(question)
+        event = _try_resolve_event(db, profile, spec.event_title, reference_at)
+        issues: list[str] = []
+        if event is None:
+            issues.append("关联事项缺失")
+        else:
+            if case.cash_event_id != event.id:
+                issues.append("关联事项")
+            if (case.shared_fields or {}).get("event_title") != event.title:
+                issues.append("共享字段快照")
+        if case.question_type != spec.question_type:
+            issues.append("问题类型")
+        expected = _expected_resolution(spec)
+        if expected is None:
+            # 尚未给出核实结果的咨询不应带结论（旧实现给所有单据都写了同一句）
+            if case.resolution_summary is not None:
+                issues.append("多余结论")
+        elif (case.resolution_summary or "") != expected:
+            issues.append("核实结论")
+        # 结论字段只允许系统真正支持回写的字段（settlement_status 之类必须清掉）
+        if dict(case.resolution_fields or {}) != sanitise_resolution_fields(
+            spec.resolution_fields
+        ):
+            issues.append("结论字段")
+        if issues:
+            result.append((case, issues))
+    result.sort(key=lambda item: item[0].case_no)
+    return result
+
+
+def expected_card_title(spec: CardSpec, analysis) -> str:  # noqa: ANN001
+    """卡片标题必须与实际 payload 的分析状态相符：产不出目标状态就用普通提醒标题。"""
+    status = str(analysis.status)
+    if spec.required_status is None or status == spec.required_status:
+        return spec.title
+    return RISK_TITLE_BY_STATUS.get(status, spec.title)
+
+
+def card_payload_preview(db, profile, spec: CardSpec, card):  # noqa: ANN001
+    """用现有 service 按关联事项重算 payload —— 修复与校验共用同一口径。"""
+    from app.services.household_service import HouseholdService  # noqa: PLC0415
+
+    _title, summary, payload, _fields = HouseholdService(db).build_preview(
+        profile,
+        card_type=spec.card_type,
+        shared_fields=list(spec.shared_fields),
+        analysis_result_id=card.analysis_result_id,
+        cash_event_id=card.cash_event_id,
+        planned_amount_cents=spec.planned_cents,
+    )
+    return summary, payload
+
+
+def card_repairs(db, profile, merchant, reference_at: datetime) -> list[tuple]:  # noqa: ANN001
+    """返回 ``[(card, 待修复项), ...]``：只包含本脚本预置、且与 Spec 不一致的卡片。"""
+    from app.models.cash import AnalysisResult  # noqa: PLC0415
+
+    cards = _script_cards(db, profile, merchant)
+    result: list[tuple] = []
+    for spec in CARD_SPECS:
+        card = None
+        for title in card_title_candidates(spec):
+            card = cards.get((spec.card_type, title))
+            if card is not None:
+                break
+        if card is None:
+            continue
+
+        issues: list[str] = []
+        if spec.event_title is not None:
+            event = _try_resolve_event(db, profile, spec.event_title, reference_at)
+            if event is None:
+                issues.append("关联事项缺失")
+            elif card.cash_event_id != event.id:
+                issues.append("关联事项")
+        elif card.cash_event_id is not None:
+            issues.append("多余的事项关联")
+
+        analysis = (
+            db.get(AnalysisResult, card.analysis_result_id)
+            if card.analysis_result_id
+            else None
+        )
+        expected_analysis = find_matching_analysis(
+            db, profile, ANALYSIS_SPECS_BY_KEY[spec.analysis_key], reference_at
+        )
+        if analysis is None or expected_analysis is None or analysis.id != expected_analysis.id:
+            issues.append("关联分析结果")
+        else:
+            if card.title != expected_card_title(spec, analysis):
+                issues.append("标题与内容不符")
+            summary, payload = card_payload_preview(db, profile, spec, card)
+            if dict(card.payload or {}) != payload:
+                issues.append("payload 与关联事项不一致")
+            elif (card.summary or "") != (summary or "")[:2000]:
+                issues.append("摘要与 payload 不一致")
+        if issues:
+            result.append((card, issues))
+    result.sort(key=lambda item: (item[0].card_type, item[0].title))
+    return result
+
+
+def settlement_channel_repairs(db, profile) -> list:  # noqa: ANN001
+    """返回渠道值不是 canonical 的**预置**结算记录（绝不碰用户导入的其它渠道）。"""
+    return [row for row in script_settlements(db, profile) if row.channel != SETTLEMENT_CHANNEL]
+
+
+def repair_product_data(
+    db,
+    *,
+    profile,
+    merchant,
+    reference_at: datetime,
+    verbose: bool = True,
+) -> int:
+    """修复阶段：把已经存在但内容错误的预置数据改成与 Spec 一致（幂等）。
+
+    只动本脚本预置的对象；修复时**保留**咨询/卡片的历史交互
+    （已读状态、表态、评论、created_at、时间线与状态流转）。
+    """
+    from app.models.cash import AnalysisResult  # noqa: PLC0415
+    from app.services.consultation_service import ConsultationService  # noqa: PLC0415
+    from app.services.enhancement_service import EnhancementService  # noqa: PLC0415
+
+    repaired = 0
+
+    # --- 1) 结算渠道统一 ---
+    channel_rows = settlement_channel_repairs(db, profile)
+    if channel_rows:
+        for row in channel_rows:
+            row.channel = SETTLEMENT_CHANNEL
+        db.commit()
+        # 渠道参与结算依据串，必须让既有增强结果失效并前进 history_revision
+        enhancement = EnhancementService(db)
+        enhancement.bump_history_revision(profile.id, commit=False)
+        enhancement.mark_runs_stale(profile.id, f"{SOURCE_PREFIX}: 结算渠道已统一")
+        repaired += len(channel_rows)
+        if verbose:
+            print(f"  ✓ 结算渠道统一为「{SETTLEMENT_CHANNEL}」：{len(channel_rows)} 条")
+
+    # --- 2) 经营咨询：关联事项 / 问题类型 / 核实结论 ---
+    service = ConsultationService(db)
+    for case, issues in consultation_repairs(db, profile, merchant, reference_at):
+        spec = _consultation_spec_of(case.question)
+        event = _try_resolve_event(db, profile, spec.event_title, reference_at)
+        if event is not None and ("关联事项" in issues or "共享字段快照" in issues):
+            case.cash_event_id = event.id
+            case.cash_event_version = event.current_version
+            # 共享字段快照必须按新关联事项重算（仍是服务端白名单裁剪）
+            case.shared_fields = service.build_shared_fields(case.case_no, event, case.question)
+        if "问题类型" in issues:
+            case.question_type = spec.question_type
+        expected = _expected_resolution(spec)
+        expected_fields = sanitise_resolution_fields(spec.resolution_fields)
+        if expected is None and "多余结论" in issues:
+            # 该单据尚未给出核实结果，清掉误写的结论
+            case.resolution_summary = None
+        if expected is not None and "核实结论" in issues:
+            case.resolution_summary = expected
+        if "结论字段" in issues:
+            case.resolution_fields = expected_fields
+        db.commit()
+        repaired += 1
+        if verbose:
+            print(f"  ✓ 修复咨询 {case.case_no}：{'、'.join(issues)}")
+
+    # --- 3) 协同卡：关联事项 / 分析结果 / 标题 / payload ---
+    for card, issues in card_repairs(db, profile, merchant, reference_at):
+        spec = next(
+            s
+            for s in CARD_SPECS
+            if s.card_type == card.card_type and card.title in card_title_candidates(s)
+        )
+        if spec.event_title is not None:
+            event = _try_resolve_event(db, profile, spec.event_title, reference_at)
+            if event is not None:
+                card.cash_event_id = event.id
+        else:
+            card.cash_event_id = None
+
+        analysis = find_matching_analysis(
+            db, profile, ANALYSIS_SPECS_BY_KEY[spec.analysis_key], reference_at
+        )
+        if analysis is not None:
+            card.analysis_result_id = analysis.id
+        elif card.analysis_result_id:  # pragma: no cover - ensure 阶段已保证分析存在
+            analysis = db.get(AnalysisResult, card.analysis_result_id)
+
+        if analysis is not None:
+            card.title = expected_card_title(spec, analysis)[:128]
+        summary, payload = card_payload_preview(db, profile, spec, card)
+        card.payload = payload
+        card.summary = (summary or "")[:2000]
+        card.shared_fields = list(spec.shared_fields)
+        card.planned_household_amount_cents = spec.planned_cents
+        card.system_max_withdrawable_cents = payload.get("max_withdrawable_cents")
+        # 注意：不触碰 created_at / updated_at / 已读状态 / 表态 / 评论
+        db.commit()
+        repaired += 1
+        if verbose:
+            print(f"  ✓ 修复协同卡「{card.title}」（{card.card_type}）：{'、'.join(issues)}")
+
+    return repaired
 
 
 # ---------------------------------------------------------------------------
@@ -1335,7 +2030,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  经营主体：{profile.business_name}")
         print()
 
-        plan = build_plan(profile, reference_at=reference_at, dry_run=args.dry_run)
+        plan = build_plan(
+            profile,
+            merchant=merchant,
+            reference_at=reference_at,
+            dry_run=args.dry_run,
+        )
 
         print("=== 计划动作 ===")
         if not plan.actions:
@@ -1353,7 +2053,7 @@ def main(argv: list[str] | None = None) -> int:
             print("dry-run 结束：未写入任何数据。")
             return 0
 
-        print("=== 执行 ===")
+        print("=== ensure：补齐缺失数据 ===")
         apply_merchant_data(
             db,
             profile=profile,
@@ -1382,7 +2082,19 @@ def main(argv: list[str] | None = None) -> int:
             profile=profile,
             merchant=merchant,
             consultant_user=users[CONSULTANT_USERNAME],
+            reference_at=reference_at,
         )
+        print()
+
+        print("=== repair：修正已存在但与 Spec 不一致的预置数据 ===")
+        repaired = repair_product_data(
+            db,
+            profile=profile,
+            merchant=merchant,
+            reference_at=reference_at,
+        )
+        if repaired == 0:
+            print("  无待修复对象")
         print()
         print("apply 完成。")
         return 0

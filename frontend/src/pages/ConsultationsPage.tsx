@@ -36,6 +36,7 @@ import {
   StatusTag,
 } from '@/components/ui';
 import MobileConsultationList from '@/features/consultation/MobileConsultationList';
+import { buildResolutionFieldItems } from '@/features/consultation/resolutionFields';
 import RevisionDrawer from '@/features/events/RevisionDrawer';
 import type { ConsultationCase, ConsultationStatus } from '@/types';
 import { formatCny } from '@/utils/money';
@@ -178,11 +179,11 @@ export default function ConsultationsPage() {
 
   const detail = detailQuery.data;
 
-  const corrections = useMemo(() => {
-    if (!detail) return [];
-    const fields = detail.resolution_fields ?? {};
-    return Object.entries(fields).map(([key, value]) => ({ key, value }));
-  }, [detail]);
+  const corrections = useMemo(
+    // 只显示中文标签与可读值：内部字段名不进入界面（见 features/consultation/resolutionFields）
+    () => buildResolutionFieldItems(detail?.resolution_fields),
+    [detail],
+  );
 
   return (
     <div className="gew-stack">
@@ -411,8 +412,8 @@ export default function ConsultationsPage() {
                 {corrections.length > 0 ? (
                   <Descriptions size="small" column={1} bordered>
                     {corrections.map((item) => (
-                      <Descriptions.Item key={item.key} label={item.key}>
-                        {String(item.value)}
+                      <Descriptions.Item key={item.key} label={item.label}>
+                        {item.value}
                       </Descriptions.Item>
                     ))}
                   </Descriptions>
