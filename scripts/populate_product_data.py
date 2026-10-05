@@ -139,8 +139,40 @@ class Plan:
 # ---------------------------------------------------------------------------
 # 时间工具：统一走 UTC 存库 + Asia/Shanghai 语义
 # ---------------------------------------------------------------------------
-def resolve_reference(reference_at: str | None) -> datetime:
-    """解析期初时点；缺省为 Asia/Shanghai 的当前时间，取整到分钟。"""
+def preset_snapshot_at(db, merchant_id: str) -> datetime | None:  # noqa: ANN001
+    """本脚本登记的那条资金时点的时点值（没有则 None）。"""
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from app.models.merchant import BusinessAccountSnapshot  # noqa: PLC0415
+
+    rows = db.scalars(
+        select(BusinessAccountSnapshot)
+        .where(BusinessAccountSnapshot.merchant_id == merchant_id)
+        .order_by(BusinessAccountSnapshot.snapshot_at.desc())
+    ).all()
+    for row in rows:
+        note = row.note or ""
+        if note.startswith(SOURCE_PREFIX):
+            return row.snapshot_at
+    return rows[0].snapshot_at if rows else None
+
+
+def resolve_reference(
+    reference_at: str | None,
+    *,
+    db=None,  # noqa: ANN001
+    merchant_id: str | None = None,
+) -> datetime:
+    """解析期初时点。
+
+    显式传入就用传入值；否则**锚定到已经登记的经营资金时点**
+    （优先本脚本登记的那条，其次最近一条），都没有才用当前时间。
+
+    为什么不能默认「现在」：事项编号、结算编号都带日期
+    （``PAY-20261007-001``），隔一天再跑就会算出全新的一批编号，
+    于是把整套预置数据又建一遍。锚定到首次建设的时点后，
+    任何一天重跑都得到同一批编号，幂等才真正成立。
+    """
     from app.utils.timeutil import APP_TIMEZONE, to_utc  # noqa: PLC0415
 
     if reference_at:
@@ -148,6 +180,11 @@ def resolve_reference(reference_at: str | None) -> datetime:
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=APP_TIMEZONE)
         return to_utc(parsed).replace(second=0, microsecond=0)
+
+    if db is not None and merchant_id:
+        anchor = preset_snapshot_at(db, merchant_id)
+        if anchor is not None:
+            return to_utc(anchor).replace(second=0, microsecond=0)
 
     local = datetime.now(APP_TIMEZONE).replace(second=0, microsecond=0)
     return to_utc(local)
@@ -1995,9 +2032,7 @@ def main(argv: list[str] | None = None) -> int:
     from app.models.user import ROLE_MERCHANT, User
 
     reference_at = resolve_reference(args.reference_at)
-    print(f"期初时点（UTC）：{reference_at.isoformat()}")
-    print(f"模式：{'dry-run（不写入）' if args.dry_run else 'apply（写入）'}")
-    print()
+    mode_label = "dry-run（不写入）" if args.dry_run else "apply（写入）"
 
     db = SessionLocal()
     try:
@@ -2023,6 +2058,13 @@ def main(argv: list[str] | None = None) -> int:
         from app.services.merchant_service import MerchantService
 
         profile = MerchantService(db).require_by_user(merchant.id)
+
+        reference_at = resolve_reference(
+            args.reference_at, db=db, merchant_id=profile.id
+        )
+        print(f"期初时点（UTC）：{reference_at.isoformat()}")
+        print(f"模式：{mode_label}")
+        print()
 
         print("=== 正式账号 ===")
         for username, user in users.items():
