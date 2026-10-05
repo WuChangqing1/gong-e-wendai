@@ -9,10 +9,14 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import client_ip, get_current_user, get_merchant_profile
 from app.core.database import get_db
+from app.core.errors import ValidationFailed
 from app.models.merchant import MerchantProfile
 from app.models.user import User
 from app.repositories.user_repo import AuditService
 from app.schemas.analysis import (
+    MODE_CURRENT_PLAN,
+    MODE_DELAYED,
+    MODE_JOINT,
     AnalysisResultOut,
     AnalysisRunRequest,
     ScenarioCreate,
@@ -22,7 +26,7 @@ from app.schemas.analysis import (
     WindowSummary,
 )
 from app.schemas.cash_event import CancelRequest
-from app.services.analysis_service import AnalysisService
+from app.services.analysis_service import DEFAULT_DELAY_DAYS, AnalysisService
 
 router = APIRouter(tags=["资金分析"])
 
@@ -33,6 +37,11 @@ router = APIRouter(tags=["资金分析"])
     summary="未来 7 天窗口聚合（供图表使用）",
 )
 def window_summary(
+    mode: str = Query(
+        default=MODE_CURRENT_PLAN,
+        description="口径：current_plan / delayed / joint，缺省按当前计划（向后兼容）",
+    ),
+    delay_days: int = Query(default=DEFAULT_DELAY_DAYS, ge=0, le=30),
     buffer_cents: int | None = Query(default=None, ge=0),
     reference_at: datetime | None = Query(
         default=None, description="指定期初时点，默认取最近一次资金时点"
@@ -42,10 +51,17 @@ def window_summary(
 ) -> WindowSummary:
     """按日聚合收付款、按事项类型聚合收支结构、给出待结算到账时间分布。
 
-    全部由确定性引擎的事件扫描结果聚合，不重新定义任何金额规则。
+    全部由确定性引擎的事件扫描结果聚合，不重新定义任何金额规则；
+    ``mode`` 决定统计哪些事项，共同约束模式取**真正绑定**的那个情景。
     """
+    if mode not in (MODE_CURRENT_PLAN, MODE_DELAYED, MODE_JOINT):
+        raise ValidationFailed("不支持的分析模式", code="UNSUPPORTED_MODE")
     return AnalysisService(db).window_summary(
-        profile, snapshot_at=reference_at, buffer_cents=buffer_cents
+        profile,
+        mode=mode,
+        delay_days=delay_days,
+        snapshot_at=reference_at,
+        buffer_cents=buffer_cents,
     )
 
 

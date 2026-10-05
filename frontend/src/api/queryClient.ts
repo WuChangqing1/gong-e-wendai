@@ -31,6 +31,7 @@ export const queryKeys = {
   todayAnalysis: ['analysis', 'today'] as const,
   analysisStale: ['analysis', 'stale'] as const,
   analysisHistory: ['analysis', 'history'] as const,
+  /** 窗口聚合按口径缓存：三种模式必须各自成 key，否则切换后会拿到旧数据 */
   windowSummary: (params: Record<string, unknown> = {}) =>
     ['analysis', 'window-summary', params] as const,
   cashEvents: (params: Record<string, unknown>) => ['cash-events', params] as const,

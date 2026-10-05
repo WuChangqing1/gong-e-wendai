@@ -43,6 +43,7 @@ from app.services.cash_engine import (
     JointResult,
     ResolvedAnalysis,
     events_version_hash,
+    participating_events,
     resolve_analysis,
     run_engine,
     run_joint,
@@ -52,6 +53,10 @@ from app.utils.timeutil import APP_TIMEZONE, WINDOW_DAYS, to_utc, utcnow
 MODE_CURRENT_PLAN = "current_plan"
 MODE_DELAYED = "delayed"
 MODE_JOINT = "joint"
+
+#: 聚合接口（图表窗口汇总）默认的到账延迟天数。
+#: 与「今日决策」页默认展示的到账延迟口径保持一致。
+DEFAULT_DELAY_DAYS = 2
 
 STALE_REASON_DEFAULT = "收付款事项或资金时点已变更"
 
@@ -380,28 +385,51 @@ class AnalysisService:
         self,
         profile: MerchantProfile,
         *,
+        mode: str = MODE_CURRENT_PLAN,
+        delay_days: int = DEFAULT_DELAY_DAYS,
         snapshot_at: datetime | None = None,
         buffer_cents: int | None = None,
     ) -> WindowSummary:
         """聚合未来 7 天窗口内的分析数据（供图表使用）。
 
-        聚合口径与引擎完全一致：只统计 ``state = scheduled`` 且落在窗口内的
-        事项，方向决定符号，逐日以当地时区（Asia/Shanghai）归日。
+        口径由 ``mode`` 决定，且**完全复用引擎输入**：
+
+        * ``current_plan``：按已确认的计划事项；
+        * ``delayed``：收入按 ``delay_days`` 推后到账；
+        * ``joint``：取 :func:`resolve_analysis` 选出的**绑定情景**
+          （真正最保守的那个），而不是固定取第一个情景。
+
+        本方法是纯读取：不创建 ``AnalysisResult``、不写库、不产生审计。
         """
-        reference = self._reference_time(profile, snapshot_at)
-        window_end = reference + timedelta(days=WINDOW_DAYS)
-        opening = self._opening_balance(profile)
-        buffer = (
-            int(buffer_cents)
-            if buffer_cents is not None
-            else int(profile.default_buffer_amount_cents)
+        inputs = self.build_inputs(
+            profile,
+            mode=mode,
+            snapshot_at=snapshot_at,
+            delay_days=delay_days,
+            buffer_cents=buffer_cents,
         )
 
+        if mode == MODE_JOINT:
+            joint: JointResult = run_joint(inputs)
+            results = joint.scenario_results
+            resolved = resolve_analysis(mode=mode, engine_results=results, joint=joint)
+            binding_index = resolved.binding_scenario_index or 0
+        else:
+            resolved = resolve_analysis(mode=mode, engine_results=[run_engine(inputs[0])])
+            binding_index = 0
+
+        selected = inputs[binding_index]
+        reference = to_utc(selected.snapshot_at)
+        window_days = int(selected.window_days)
+        window_end = reference + timedelta(days=window_days)
+        opening = int(selected.opening_balance_cents)
+        buffer = int(selected.buffer_cents)
+
+        # 只聚合引擎真正参与推演、且落在窗口内的事项：与顶部结论同源。
         events = [
             event
-            for event in self.load_events(profile.id)
-            if event.state == "scheduled"
-            and reference <= to_utc(event.scheduled_at) <= window_end
+            for event in participating_events(selected.events)
+            if reference <= to_utc(event.scheduled_at) <= window_end
         ]
 
         # 逐日聚合：以当地时间为准归日，保证与经营者看到的日期一致
@@ -503,9 +531,15 @@ class AnalysisService:
         ]
 
         return WindowSummary(
+            mode=mode,
+            delay_days=int(delay_days),
+            status=str(resolved.status),
+            status_label=resolved.status_label,
+            binding_scenario_index=resolved.binding_scenario_index,
+            binding_label=resolved.binding_label,
             window_start=reference,
             window_end=window_end,
-            window_days=WINDOW_DAYS,
+            window_days=window_days,
             opening_balance_cents=opening,
             closing_balance_cents=running,
             buffer_cents=buffer,

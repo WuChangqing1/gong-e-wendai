@@ -21,7 +21,7 @@ import CumulativeFlowChart from '@/components/charts/CumulativeFlowChart';
 import DailyFlowChart from '@/components/charts/DailyFlowChart';
 import ScenarioComparisonChart from '@/components/charts/ScenarioComparisonChart';
 import { SectionCard } from '@/components/ui';
-import type { AnalysisResult, WindowSummary } from '@/types';
+import type { AnalysisMode, AnalysisResult, WindowSummary } from '@/types';
 import { formatCny, formatSigned } from '@/utils/money';
 
 function MiniMetric({
@@ -98,15 +98,22 @@ export function AnalysisMetrics({ summary }: { summary: WindowSummary }) {
 
 export default function AnalysisChartsPanel({
   analysis,
+  mode = 'current_plan',
+  delayDays = 2,
   compact = false,
 }: {
   analysis: AnalysisResult | null;
+  /** 当前页面口径：与顶部结论使用同一个值，图表必须跟着变 */
+  mode?: AnalysisMode;
+  /** 到账延迟天数（口径为「到账延迟 / 共同约束」时生效） */
+  delayDays?: number;
   /** 今日决策页使用紧凑模式：默认只渲染核心图表 */
   compact?: boolean;
 }) {
   const summaryQuery = useQuery({
-    queryKey: queryKeys.windowSummary(),
-    queryFn: () => analysisApi.windowSummary(),
+    // key 里必须带口径，否则切换模式后会复用上一种模式的缓存
+    queryKey: queryKeys.windowSummary({ mode, delay_days: delayDays }),
+    queryFn: () => analysisApi.windowSummary({ mode, delay_days: delayDays }),
   });
 
   const summary = summaryQuery.data;

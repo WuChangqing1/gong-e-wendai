@@ -344,6 +344,15 @@ def _prepare(
     return participating, validation_errors, excluded
 
 
+def participating_events(events: Sequence[CashEventInput]) -> list[CashEventInput]:
+    """引擎实际参与未来推演的事项。
+
+    聚合类接口（图表窗口汇总等）必须复用本函数，而不是自己再写一套
+    「哪些事项算数」的过滤规则 —— 否则图表与顶部结论会分叉。
+    """
+    return _prepare(events)[0]
+
+
 def _sort_key(event: CashEventInput):
     """同一时刻没有明确 ``sequence_index`` 时：先支出，后收入。
 

@@ -180,6 +180,14 @@ class ArrivalTerm(BaseModel):
 
 
 class WindowSummary(BaseModel):
+    #: 本次聚合使用的口径，便于前端确认「图表与顶部结论同源」。
+    mode: str = MODE_CURRENT_PLAN
+    delay_days: int = 0
+    status: str | None = None
+    status_label: str | None = None
+    binding_scenario_index: int | None = None
+    binding_label: str | None = None
+
     window_start: datetime
     window_end: datetime
     window_days: int

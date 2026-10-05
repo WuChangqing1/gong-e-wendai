@@ -321,9 +321,10 @@ export default function AnalysisPage() {
             )}
           </SectionCard>
 
-          {/* 图表化分析：每日收支、收支结构、余额变化过程、资金积累节奏、到账分布、情景对比 */}
+          {/* 图表化分析：每日收支、收支结构、余额变化过程、资金积累节奏、到账分布、情景对比。
+              口径跟着本页的模式与延迟天数走，避免图表与上面的结论对不上。 */}
           <Suspense fallback={<ChartLoading height={520} />}>
-            <AnalysisChartsPanelLazy analysis={result} />
+            <AnalysisChartsPanelLazy analysis={result} mode={mode} delayDays={delayDays} />
           </Suspense>
 
           <SectionCard title="情景对比明细">
