@@ -107,6 +107,12 @@ describe('协同卡 payload 渲染', () => {
     expect(items[0].value).toBe('—');
   });
 
+  it('空列表显示「暂无」而不是一片空白', () => {
+    const items = buildCardPayloadItems({ pending_inflows: [] });
+    expect(items[0].label).toBe('尚未到账的收入');
+    expect(items[0].value).toBe('暂无');
+  });
+
   it('更正通知卡渲染「改前 → 改后」，且不显示内部字段名', async () => {
     const { render, screen } = await import('@testing-library/react');
     const items = buildCardPayloadItems({

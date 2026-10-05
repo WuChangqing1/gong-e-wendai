@@ -80,6 +80,8 @@ function renderValue(key: string, value: unknown): ReactNode {
   }
 
   if (Array.isArray(value)) {
+    // 空列表必须有明确空状态，不能留一片空白（例如「尚未到账的收入」）
+    if (value.length === 0) return '暂无';
     return (
       <ul style={{ margin: 0, paddingLeft: 18 }}>
         {value.map((item, index) => (
