@@ -387,6 +387,7 @@ class AnalysisService:
         *,
         mode: str = MODE_CURRENT_PLAN,
         delay_days: int = DEFAULT_DELAY_DAYS,
+        scenario_ids: list[str] | None = None,
         snapshot_at: datetime | None = None,
         buffer_cents: int | None = None,
     ) -> WindowSummary:
@@ -397,7 +398,8 @@ class AnalysisService:
         * ``current_plan``：按已确认的计划事项；
         * ``delayed``：收入按 ``delay_days`` 推后到账；
         * ``joint``：取 :func:`resolve_analysis` 选出的**绑定情景**
-          （真正最保守的那个），而不是固定取第一个情景。
+          （真正最保守的那个），而不是固定取第一个情景；
+        * ``scenarios``：按用户选中的自定义情景（与情景分析页保持一致）。
 
         本方法是纯读取：不创建 ``AnalysisResult``、不写库、不产生审计。
         """
@@ -405,6 +407,7 @@ class AnalysisService:
             profile,
             mode=mode,
             snapshot_at=snapshot_at,
+            scenario_ids=scenario_ids,
             delay_days=delay_days,
             buffer_cents=buffer_cents,
         )
@@ -415,8 +418,9 @@ class AnalysisService:
             resolved = resolve_analysis(mode=mode, engine_results=results, joint=joint)
             binding_index = resolved.binding_scenario_index or 0
         else:
-            resolved = resolve_analysis(mode=mode, engine_results=[run_engine(inputs[0])])
-            binding_index = 0
+            results = [run_engine(item) for item in inputs]
+            resolved = resolve_analysis(mode=mode, engine_results=results)
+            binding_index = resolved.binding_scenario_index or 0
 
         selected = inputs[binding_index]
         reference = to_utc(selected.snapshot_at)

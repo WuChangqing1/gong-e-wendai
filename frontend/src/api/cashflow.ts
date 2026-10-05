@@ -78,7 +78,13 @@ export const analysisApi = {
    * 页面切到「到账延迟 / 共同约束」后图表就会与顶部结论矛盾。
    */
   windowSummary: (
-    params: { mode?: AnalysisMode; delay_days?: number; buffer_cents?: number; reference_at?: string } = {},
+    params: {
+      mode?: AnalysisMode;
+      delay_days?: number;
+      scenario_ids?: string[] | null;
+      buffer_cents?: number;
+      reference_at?: string;
+    } = {},
   ) => get<WindowSummary>('/analysis/window-summary', { params }),
 };
 

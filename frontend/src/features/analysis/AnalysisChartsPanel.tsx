@@ -100,6 +100,7 @@ export default function AnalysisChartsPanel({
   analysis,
   mode = 'current_plan',
   delayDays = 2,
+  scenarioIds,
   compact = false,
 }: {
   analysis: AnalysisResult | null;
@@ -107,13 +108,25 @@ export default function AnalysisChartsPanel({
   mode?: AnalysisMode;
   /** 到账延迟天数（口径为「到账延迟 / 共同约束」时生效） */
   delayDays?: number;
+  /** 口径为「自定义情景」时，要聚合的情景 id（与情景分析页选择保持一致） */
+  scenarioIds?: string[];
   /** 今日决策页使用紧凑模式：默认只渲染核心图表 */
   compact?: boolean;
 }) {
+  const scenarioKey = (scenarioIds ?? []).join(',');
   const summaryQuery = useQuery({
     // key 里必须带口径，否则切换模式后会复用上一种模式的缓存
-    queryKey: queryKeys.windowSummary({ mode, delay_days: delayDays }),
-    queryFn: () => analysisApi.windowSummary({ mode, delay_days: delayDays }),
+    queryKey: queryKeys.windowSummary({
+      mode,
+      delay_days: delayDays,
+      scenario_ids: scenarioKey,
+    }),
+    queryFn: () =>
+      analysisApi.windowSummary({
+        mode,
+        delay_days: delayDays,
+        scenario_ids: mode === 'scenarios' ? (scenarioIds ?? null) : null,
+      }),
   });
 
   const summary = summaryQuery.data;

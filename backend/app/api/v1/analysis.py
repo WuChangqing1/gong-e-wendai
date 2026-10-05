@@ -17,6 +17,7 @@ from app.schemas.analysis import (
     MODE_CURRENT_PLAN,
     MODE_DELAYED,
     MODE_JOINT,
+    MODE_SCENARIOS,
     AnalysisResultOut,
     AnalysisRunRequest,
     ScenarioCreate,
@@ -39,9 +40,12 @@ router = APIRouter(tags=["资金分析"])
 def window_summary(
     mode: str = Query(
         default=MODE_CURRENT_PLAN,
-        description="口径：current_plan / delayed / joint，缺省按当前计划（向后兼容）",
+        description="口径：current_plan / delayed / joint / scenarios，缺省按当前计划",
     ),
     delay_days: int = Query(default=DEFAULT_DELAY_DAYS, ge=0, le=30),
+    scenario_ids: list[str] | None = Query(
+        default=None, description="mode=scenarios 时要聚合的自定义情景"
+    ),
     buffer_cents: int | None = Query(default=None, ge=0),
     reference_at: datetime | None = Query(
         default=None, description="指定期初时点，默认取最近一次资金时点"
@@ -54,12 +58,13 @@ def window_summary(
     全部由确定性引擎的事件扫描结果聚合，不重新定义任何金额规则；
     ``mode`` 决定统计哪些事项，共同约束模式取**真正绑定**的那个情景。
     """
-    if mode not in (MODE_CURRENT_PLAN, MODE_DELAYED, MODE_JOINT):
+    if mode not in (MODE_CURRENT_PLAN, MODE_DELAYED, MODE_JOINT, MODE_SCENARIOS):
         raise ValidationFailed("不支持的分析模式", code="UNSUPPORTED_MODE")
     return AnalysisService(db).window_summary(
         profile,
         mode=mode,
         delay_days=delay_days,
+        scenario_ids=scenario_ids,
         snapshot_at=reference_at,
         buffer_cents=buffer_cents,
     )
