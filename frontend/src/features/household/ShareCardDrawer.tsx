@@ -16,6 +16,7 @@ import {
   InputNumber,
   Space,
   Spin,
+  Tooltip,
   Typography,
 } from 'antd';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -28,7 +29,6 @@ import { InlineNote } from '@/components/ui';
 import { buildCardPayloadItems } from '@/features/household/cardPayload';
 import type { AnalysisResult, CardType } from '@/types';
 import { formatCny } from '@/utils/money';
-import { formatDateTime } from '@/utils/datetime';
 
 const DEFAULT_FIELDS = ['max_withdrawable', 'limiting_point', 'risk_summary'];
 
@@ -108,6 +108,14 @@ export default function ShareCardDrawer({
     [previewQuery.data],
   );
 
+  // 勾了「尚未到账的收入」，但当前确实没有这样的收入：
+  // 分享出去只会是一块空白，因此给出空状态并阻止提交（后端同样会拒绝）。
+  const pendingInflowsEmpty =
+    fields.includes('pending_inflows') && (result?.pending_inflows_at_limit?.length ?? 0) === 0;
+  const blockedReason = pendingInflowsEmpty
+    ? '当前没有尚未到账的收入，请取消该项后再分享。'
+    : null;
+
   return (
     <Drawer
       title="分享预览"
@@ -118,14 +126,23 @@ export default function ShareCardDrawer({
       extra={
         <Space>
           <Button onClick={onClose}>取消</Button>
-          <Button
-            type="primary"
-            disabled={!householdQuery.data || members.length === 0 || fields.length === 0}
-            loading={createMutation.isPending}
-            onClick={() => createMutation.mutate()}
-          >
-            确认分享
-          </Button>
+          <Tooltip title={blockedReason ?? undefined}>
+            <span>
+              <Button
+                type="primary"
+                disabled={
+                  !householdQuery.data ||
+                  members.length === 0 ||
+                  fields.length === 0 ||
+                  Boolean(blockedReason)
+                }
+                loading={createMutation.isPending}
+                onClick={() => createMutation.mutate()}
+              >
+                确认分享
+              </Button>
+            </span>
+          </Tooltip>
         </Space>
       }
     >
@@ -206,6 +223,10 @@ export default function ShareCardDrawer({
             <Typography.Text strong>分享内容预览</Typography.Text>
             {previewQuery.isLoading ? (
               <Spin style={{ marginTop: 12 }} />
+            ) : previewQuery.isError ? (
+              <div style={{ marginTop: 8 }}>
+                <InlineNote tone="warning">{errorMessage(previewQuery.error)}</InlineNote>
+              </div>
             ) : (
               <div className="gew-kv-list" style={{ marginTop: 8 }}>
                 {previewItems.map((item) => (
@@ -214,15 +235,16 @@ export default function ShareCardDrawer({
                     <span className="gew-kv-list__value">{item.value}</span>
                   </div>
                 ))}
+                {/* 勾了但确实没有内容时给出明确空状态，而不是留一片空白 */}
+                {pendingInflowsEmpty ? (
+                  <div className="gew-kv-list__row">
+                    <span className="gew-kv-list__key">尚未到账的收入</span>
+                    <span className="gew-kv-list__value">暂无</span>
+                  </div>
+                ) : null}
               </div>
             )}
           </div>
-
-          {result?.limiting_timestamp ? (
-            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-              最紧张时间：{formatDateTime(result.limiting_timestamp)}
-            </div>
-          ) : null}
         </div>
       ) : null}
     </Drawer>
