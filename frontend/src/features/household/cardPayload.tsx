@@ -12,6 +12,7 @@
 
 import type { ReactNode } from 'react';
 
+import RevisionSummary from '@/features/household/RevisionSummary';
 import { formatDateTime } from '@/utils/datetime';
 import { STATUS_LABELS } from '@/utils/labels';
 import { formatCny } from '@/utils/money';
@@ -30,6 +31,7 @@ export const CARD_PAYLOAD_LABELS: Record<string, string> = {
   payment_gap_cents: '付款缺口',
   buffer_gap_cents: '留底缺口',
   pending_inflows: '尚未到账的收入',
+  revision_summary: '事项变更摘要',
 };
 
 /** 未登记键的统一标签：宁可少说，也不暴露内部字段名。 */
@@ -56,6 +58,10 @@ export interface CardPayloadItem {
 
 function renderValue(key: string, value: unknown): ReactNode {
   if (value === null || value === undefined) return '—';
+
+  if (key === 'revision_summary' && typeof value === 'object' && !Array.isArray(value)) {
+    return <RevisionSummary data={value as Record<string, unknown>} />;
+  }
 
   if (typeof value === 'number') {
     if (!MONEY_KEYS.has(key)) return String(value);

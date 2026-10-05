@@ -749,6 +749,56 @@ a:hover {
   gap: var(--space-4);
 }
 
+/* ---------------- 更正通知卡的「改前 → 改后」 ---------------- */
+.gew-revision-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gew-revision-summary__event {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.gew-revision-summary__row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.gew-revision-summary__field {
+  color: var(--text-secondary);
+  min-width: 4.5em;
+}
+
+.gew-revision-summary__before {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.gew-revision-summary__arrow {
+  color: var(--text-muted);
+}
+
+.gew-revision-summary__after {
+  font-weight: 600;
+}
+
+@media (max-width: 767px) {
+  /* 窄屏纵向显示：改前在上、箭头向下、改后在下，避免挤成一行 */
+  .gew-revision-summary__row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+
+  .gew-revision-summary__arrow {
+    transform: rotate(90deg);
+  }
+}
+
 .gew-row {
   display: flex;
   align-items: center;
