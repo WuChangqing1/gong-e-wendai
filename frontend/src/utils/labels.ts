@@ -124,6 +124,25 @@ export function decisionCopy(status: AnalysisStatus): DecisionCopy {
 export const FEASIBLE_ZERO_DETAIL =
   '目前经营付款和留底仍能满足，但没有额外资金适合用于家庭提用。';
 
+/**
+ * 当前结论对应的「主角金额」。
+ *
+ * Hero 与「资金规划」必须用同一个函数取数，否则同一个页面上会出现
+ * 上方显示缺口、下方显示可提用金额的自相矛盾。
+ */
+export function decisionAmountCents(result: {
+  status: AnalysisStatus;
+  max_withdrawable_cents: number | null;
+  payment_gap_cents: number;
+  buffer_gap_cents: number;
+}): number | null {
+  const kind = decisionCopy(result.status).amountKind;
+  if (kind === 'withdrawable') return result.max_withdrawable_cents;
+  if (kind === 'payment_gap') return result.payment_gap_cents;
+  if (kind === 'buffer_gap') return result.buffer_gap_cents;
+  return null;
+}
+
 export const CONSULTATION_STATUS_LABELS: Record<ConsultationStatus, string> = {
   draft: '草稿',
   submitted: '已提交',
@@ -152,6 +171,24 @@ export const QUESTION_TYPE_LABELS: Record<string, string> = {
   fee_unknown: '手续费/费用不清楚',
   other: '其他经营资金事项',
 };
+
+/**
+ * 咨询处理结果里可回写字段的中文标签。
+ *
+ * 咨询结论只能回写系统真正支持的字段；界面**不得**把内部字段名
+ * （amount_cents / scheduled_at / settlement_status …）当标签显示给用户。
+ */
+export const RESOLUTION_FIELD_LABELS: Record<string, string> = {
+  amount_cents: '金额',
+  scheduled_at: '预计时间',
+  state: '状态',
+  title: '事项名称',
+  note: '备注',
+  source_label: '来源',
+};
+
+/** 未登记字段的统一说法：宁可少说，也不暴露内部字段名。 */
+export const UNKNOWN_RESOLUTION_FIELD_LABEL = '处理信息';
 
 export const REACTION_LABELS: Record<ReactionType, string> = {
   read: '已读',
