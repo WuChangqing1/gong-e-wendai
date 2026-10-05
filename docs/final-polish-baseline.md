@@ -65,3 +65,45 @@
 * 600 元留底的核心回归（1200 元只作为独立验收参数）
 * 三个正式账号、生产既有业务数据
 * V3 架构：无 Admin、PC/Mobile 单套代码、GLM 保留
+
+---
+
+## 6. 收口结果
+
+### 6.1 测试
+
+| 层次 | 收口前 | 收口后 |
+| --- | --- | --- |
+| Backend `pytest` | 514 | **581 passed** |
+| Frontend `typecheck` / `lint` / `build` | 通过 | 通过 |
+| Frontend `vitest` | 43 | **46 passed** |
+| Playwright E2E | 43 通过 / 1 跳过 | **47 通过 / 1 跳过** |
+| Secret Check | 通过 | 通过 |
+
+### 6.2 修复对照
+
+| 编号 | 处理 |
+| --- | --- |
+| S1 / S2 / S3 | `window-summary` 支持 `mode` / `delay_days` / `scenario_ids`，完全复用引擎输入（共同约束取绑定情景）；`TodayPage` 成为本页口径唯一状态源，`EnhancementPanel` 的「资金规划」改读当前口径结果；Query Key 按口径区分 |
+| S4 | `CONSULTATION_SPECS` 改为 dataclass + `event_title` 语义绑定，删除按位置对应的写法；结论逐条对应事项类型 |
+| S5 | `risk_summary` 只表达状态语义，永不出现金额 |
+| S6 | 勾了「尚未到账的收入」但没有内容 → 预览显示「暂无」、按钮禁用并说明原因，后端 422 `NO_PENDING_INFLOW_TO_SHARE` |
+| S7 | 删除预览底部无条件显示的「最紧张时间」，预览只渲染白名单 payload |
+| S8 | `_binding_scenario()` 统一供关键付款 / 期末余额 / 标题取数 |
+| S9 | `revision_summary` 由真实 `CashEventRevision` 生成（无差异则不生成该键） |
+| S10 | 两张更正卡分别关联鲜食原料采购（1300 → 1400 元）与平台结算款（D3 → D2） |
+| S11 | `/family/cards` 加 `RequireRole(['family_member'])`；`POST /households/join` 要求 family_member |
+| S12 | 咨询处理结果字段中文化 + 按语义格式化；未登记字段显示「处理信息」 |
+| S13 | 风险卡挂载真实生成的分析结果（延迟 2 天 = 付款缺口 / 延迟 1 天 = 低于留底） |
+| S14 | 预置结算记录渠道统一为「平台结算单」 |
+
+另外顺带修掉一个真缺陷：`HouseholdService` 读取
+`analysis.pending_inflows_at_limit`，而 `AnalysisResult` 上并没有该属性，
+勾选「尚未到账的收入」过去会 AttributeError → 500。
+
+### 6.3 验收参数（与 600 元核心回归并列保留）
+
+见 `docs/final-recording-checklist.md`：留底 1200 元时，
+按时可提用 600 / 延迟可提用 0 / 付款缺口 200 / 留底缺口 1400，
+且两个缺口不能相加。
+
